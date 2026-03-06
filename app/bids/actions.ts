@@ -92,6 +92,7 @@ export async function acceptBid(formData: FormData) {
       title: "Your Bid Was Accepted",
       message: `Congratulations! Your bid on "${orderTitle}" was accepted. Prepare for delivery.`,
       is_read: false,
+      link: `/supplier/bids/${winningBid.id}`,
     });
   }
 
@@ -101,6 +102,7 @@ export async function acceptBid(formData: FormData) {
       title: "Your Bid Was Not Selected",
       message: `The restaurant chose a different supplier for "${orderTitle}".`,
       is_read: false,
+      link: `/supplier/bids/${b.id}`,
     }));
     await admin.from("notifications").insert(rejectedNotifications);
   }
@@ -135,6 +137,7 @@ export async function rejectBid(formData: FormData) {
       title: "Your Bid Was Rejected",
       message: `Your bid on "${orderTitle}" was not selected by the restaurant.`,
       is_read: false,
+      link: `/supplier/bids/${bidId}`,
     });
   }
 

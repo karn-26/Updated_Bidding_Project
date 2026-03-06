@@ -133,7 +133,8 @@ export default function MyBidsPanel({
           const orderTitle = bid.orders?.title ?? "—";
           const isWon      = bid.status === "won";
           const isRejected = bid.status === "rejected";
-          const isClickable = isWon || isRejected;
+          const isPending  = bid.status === "pending";
+          const isClickable = isWon || isRejected || isPending;
 
           const cardContent = (
             <>
@@ -147,14 +148,20 @@ export default function MyBidsPanel({
                 </p>
                 <div className="flex items-center gap-1.5">
                   <span className={`badge ${s.badgeCls}`}>{s.label}</span>
-                  {isClickable && (
-                    <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                    </svg>
-                  )}
+                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
                 </div>
               </div>
 
+              {isPending && (
+                <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-indigo-600">
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                  </svg>
+                  Tap to view or edit this bid
+                </p>
+              )}
               {isWon && (
                 <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

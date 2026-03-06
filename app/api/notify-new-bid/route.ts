@@ -21,6 +21,7 @@ export async function POST(request: Request) {
       title: "New Bid Received",
       message: `${supplierName} submitted a bid on your order "${order.title}".`,
       is_read: false,
+      link: `/bids?order=${orderId}`,
     });
     if (error) throw error;
 

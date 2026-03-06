@@ -27,11 +27,11 @@ export default async function RootLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
-  let initialNotifications: { id: string; title: string; message: string; is_read: boolean; created_at: string }[] = [];
+  let initialNotifications: { id: string; title: string; message: string; is_read: boolean; created_at: string; link: string | null }[] = [];
   if (user) {
     const { data } = await supabase
       .from("notifications")
-      .select("id, title, message, is_read, created_at")
+      .select("id, title, message, is_read, created_at, link")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(30);

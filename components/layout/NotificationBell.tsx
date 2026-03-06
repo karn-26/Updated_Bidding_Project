@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markNotificationRead, markAllNotificationsRead } from "@/app/notifications/actions";
 
@@ -10,6 +11,7 @@ export type AppNotification = {
   message: string;
   is_read: boolean;
   created_at: string;
+  link: string | null;
 };
 
 export default function NotificationBell({
@@ -19,6 +21,7 @@ export default function NotificationBell({
   initialNotifications: AppNotification[];
   userId: string;
 }) {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -57,9 +60,13 @@ export default function NotificationBell({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleClickNotification = async (id: string) => {
+  const handleClickNotification = async (id: string, link: string | null) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
     await markNotificationRead(id);
+    if (link) {
+      setOpen(false);
+      router.push(link);
+    }
   };
 
   const handleMarkAllRead = async () => {
@@ -103,10 +110,10 @@ export default function NotificationBell({
               notifications.map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => handleClickNotification(n.id)}
+                  onClick={() => handleClickNotification(n.id, n.link)}
                   className={`w-full px-4 py-3 text-left transition hover:bg-slate-50 ${
                     !n.is_read ? "bg-indigo-50/60" : ""
-                  }`}
+                  } ${n.link ? "cursor-pointer" : "cursor-default"}`}
                 >
                   <div className="flex gap-2.5">
                     <div className="mt-1.5 h-2 w-2 shrink-0">
@@ -114,10 +121,17 @@ export default function NotificationBell({
                         <span className="block h-2 w-2 rounded-full bg-indigo-500" />
                       )}
                     </div>
-                    <div className="min-w-0">
-                      <p className={`text-sm font-medium truncate ${n.is_read ? "text-slate-500" : "text-slate-900"}`}>
-                        {n.title}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className={`text-sm font-medium truncate ${n.is_read ? "text-slate-500" : "text-slate-900"}`}>
+                          {n.title}
+                        </p>
+                        {n.link && (
+                          <svg className="h-3.5 w-3.5 shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                          </svg>
+                        )}
+                      </div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{n.message}</p>
                       <p className="mt-1 text-[10px] text-slate-300">
                         {new Date(n.created_at).toLocaleDateString("en-US", {

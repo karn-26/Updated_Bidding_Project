@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       title: "New Order Available",
       message: `A new order "${orderTitle}" has been posted. Be the first to bid!`,
       is_read: false,
+      link: `/supplier/bids/new?order_id=${orderId}`,
     }));
 
     const { error } = await admin.from("notifications").insert(notifications);

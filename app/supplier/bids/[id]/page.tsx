@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import EditBidForm from "@/components/supplier/EditBidForm";
 
 const statusConfig: Record<string, { label: string; cardCls: string; badgeCls: string }> = {
   pending:  { label: "Pending",  cardCls: "border-slate-200 bg-white",       badgeCls: "bg-amber-100 text-amber-700"    },
@@ -29,9 +31,12 @@ export default async function BidDetailPage({
   if (bidError) console.error("Error fetching bid:", bidError);
   if (!bid) notFound();
 
-  // 2. Fetch the order row on its own — no nested join to avoid PostgREST
-  //    "Cannot coerce the result to a single JSON object" error
-  const { data: order, error: orderError } = await supabase
+  // 2 & 3. Use admin client for order + items — the supplier RLS policy only allows
+  //    SELECT on orders/order_items with status = 'open', but accepted bids have
+  //    status = 'closed'. Ownership is already verified above via the bid query.
+  const admin = createAdminClient();
+
+  const { data: order, error: orderError } = await admin
     .from("orders")
     .select("id, title, deadline, status")
     .eq("id", bid.order_id)
@@ -40,8 +45,7 @@ export default async function BidDetailPage({
   if (orderError) console.error("Error fetching order:", orderError);
   if (!order) notFound();
 
-  // 3. Fetch order items separately — no .single() since there can be many rows
-  const { data: orderItemsData, error: itemsError } = await supabase
+  const { data: orderItemsData, error: itemsError } = await admin
     .from("order_items")
     .select("id, name, quantity, unit")
     .eq("order_id", bid.order_id);
@@ -162,35 +166,41 @@ export default async function BidDetailPage({
 
           {/* Bid details */}
           <div className={`card overflow-hidden border ${s.cardCls}`}>
-            <div className="border-b border-inherit bg-white/60 px-5 py-3">
+            <div className="flex items-center justify-between border-b border-inherit bg-white/60 px-5 py-3">
               <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Your Bid</p>
+              <span className={`badge ${s.badgeCls}`}>{s.label}</span>
             </div>
-            <div className="p-5">
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
-                <div>
-                  <dt className="text-slate-400">Bid amount</dt>
-                  <dd className={`mt-0.5 text-2xl font-extrabold ${isWon ? "text-emerald-700" : isRejected ? "text-red-600" : "text-slate-900"}`}>
-                    ${bid.price.toLocaleString()}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-slate-400">Proposed delivery</dt>
-                  <dd className="mt-0.5 font-semibold text-slate-800">{bid.delivery_date ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-slate-400">Final status</dt>
-                  <dd className="mt-1">
-                    <span className={`badge ${s.badgeCls}`}>{s.label}</span>
-                  </dd>
-                </div>
-                {bid.notes && (
-                  <div className="col-span-2">
-                    <dt className="text-slate-400">Notes</dt>
-                    <dd className="mt-0.5 leading-relaxed text-slate-700">{bid.notes}</dd>
+
+            {bid.status === "pending" ? (
+              <EditBidForm
+                bidId={bid.id}
+                initialPrice={bid.price}
+                initialDeliveryDate={bid.delivery_date}
+                initialNotes={bid.notes}
+                orderDeadline={order.deadline}
+              />
+            ) : (
+              <div className="p-5">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
+                  <div>
+                    <dt className="text-slate-400">Bid amount</dt>
+                    <dd className={`mt-0.5 text-2xl font-extrabold ${isWon ? "text-emerald-700" : "text-red-600"}`}>
+                      ${bid.price.toLocaleString()}
+                    </dd>
                   </div>
-                )}
-              </dl>
-            </div>
+                  <div>
+                    <dt className="text-slate-400">Proposed delivery</dt>
+                    <dd className="mt-0.5 font-semibold text-slate-800">{bid.delivery_date ?? "—"}</dd>
+                  </div>
+                  {bid.notes && (
+                    <div className="col-span-2">
+                      <dt className="text-slate-400">Notes</dt>
+                      <dd className="mt-0.5 leading-relaxed text-slate-700">{bid.notes}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            )}
           </div>
         </div>
       </div>

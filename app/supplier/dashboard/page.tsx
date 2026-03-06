@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import MyBidsPanel, { type SupplierBid } from "@/components/supplier/MyBidsPanel";
 
@@ -46,7 +47,12 @@ export default async function SupplierDashboardPage() {
 
   if (ordersError) console.error("Supabase error fetching open orders:", ordersError);
 
-  const { data: myBidsData, error: bidsError } = await supabase
+  // Use admin client so the orders join works regardless of order status.
+  // The supplier RLS policy only allows reading open orders, which means
+  // orders that have been closed (after a bid is accepted) return null
+  // for the join, causing the order title to show as "—".
+  const admin = createAdminClient();
+  const { data: myBidsData, error: bidsError } = await admin
     .from("bids")
     .select(`id, order_id, price, status, orders ( title )`)
     .eq("supplier_id", user.id)

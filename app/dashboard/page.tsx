@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import QuickOrderButton from "@/components/presets/QuickOrderButton";
 
 const statusConfig: Record<string, { label: string; cls: string }> = {
   open:      { label: "Open",      cls: "bg-emerald-100 text-emerald-700" },
@@ -24,6 +25,13 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false });
 
   if (ordersError) console.error("Supabase error fetching orders:", ordersError);
+
+  const { data: presets } = await supabase
+    .from("order_presets")
+    .select("id, name, items")
+    .eq("restaurant_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(4);
 
   const rows = orders ?? [];
   const openCount      = rows.filter((o) => o.status === "open").length;
@@ -58,6 +66,31 @@ export default async function DashboardPage() {
           <StatCard icon="💬" label="Pending Bids"    value={pendingBids}    color="amber"   />
           <StatCard icon="✅" label="Fulfilled Orders" value={fulfilledCount} color="emerald" />
         </div>
+
+        {/* Quick Reorder */}
+        {presets && presets.length > 0 && (
+          <div className="mb-8">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-semibold text-slate-900">Quick Reorder</h2>
+              <Link href="/presets" className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline">
+                Manage presets →
+              </Link>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {presets.map((preset) => (
+                <div key={preset.id} className="card flex flex-col gap-3 p-4">
+                  <div>
+                    <p className="truncate font-semibold text-slate-900">{preset.name}</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {(preset.items as { name: string }[]).length} item{(preset.items as { name: string }[]).length !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <QuickOrderButton presetId={preset.id} presetName={preset.name} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Orders table */}
         <div className="card overflow-hidden">

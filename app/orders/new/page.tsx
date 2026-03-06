@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { createPreset } from "@/app/presets/actions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,13 @@ export default function NewOrderPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [saveAsPreset, setSaveAsPreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [useOrderName, setUseOrderName] = useState(false);
+
+  useEffect(() => {
+    if (useOrderName) setPresetName(orderTitle);
+  }, [useOrderName, orderTitle]);
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -286,6 +294,20 @@ export default function NewOrderPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: order.id, orderTitle: order.title }),
       }).catch((e) => console.error("notify-new-order failed:", e));
+
+      // Save as preset if requested
+      if (saveAsPreset && presetName.trim()) {
+        await createPreset(
+          presetName.trim(),
+          items
+            .filter((i) => i.name.trim())
+            .map((i) => ({
+              name: i.name.trim(),
+              quantity: parseFloat(i.quantity) || 1,
+              unit: i.unit,
+            }))
+        );
+      }
 
       setStep("success");
     } catch (err: unknown) {
@@ -807,6 +829,45 @@ export default function NewOrderPage() {
                 Add item
               </button>
             </div>
+          </div>
+
+          {/* Save as preset */}
+          <div className="card p-5">
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={saveAsPreset}
+                onChange={(e) => setSaveAsPreset(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-sm font-medium text-slate-700">
+                Save as a preset for quick reordering
+              </span>
+            </label>
+            {saveAsPreset && (
+              <div className="mt-3 space-y-2.5">
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={useOrderName}
+                    onChange={(e) => setUseOrderName(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-slate-600">Use order name as preset name</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Preset name — e.g. Weekly Produce"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  disabled={useOrderName}
+                  className="input disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                />
+                <p className="text-xs text-slate-400">
+                  This preset will appear on your dashboard and presets page for instant reordering.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Action buttons */}
