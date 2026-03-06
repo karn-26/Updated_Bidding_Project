@@ -152,7 +152,7 @@ function StatCard({
   icon: string;
   label: string;
   value: number;
-  trend: string;
+  trend?: string;
   color: "indigo" | "amber" | "emerald";
 }) {
   const accent = { indigo: "text-indigo-600", amber: "text-amber-600", emerald: "text-emerald-600" }[color];
