@@ -259,7 +259,10 @@ export default function NewOrderPage() {
         .select()
         .single();
 
-      if (orderErr) throw orderErr;
+      if (orderErr) {
+        console.error("Supabase error inserting order:", orderErr);
+        throw orderErr;
+      }
 
       const { error: itemsErr } = await supabase.from("order_items").insert(
         items
@@ -272,10 +275,26 @@ export default function NewOrderPage() {
           }))
       );
 
-      if (itemsErr) throw itemsErr;
+      if (itemsErr) {
+        console.error("Supabase error inserting order items:", itemsErr);
+        throw itemsErr;
+      }
+
+      // Notify all suppliers about the new order (fire-and-forget)
+      fetch("/api/notify-new-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id, orderTitle: order.title }),
+      }).catch((e) => console.error("notify-new-order failed:", e));
+
       setStep("success");
     } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save order.");
+      const msg =
+        err instanceof Error
+          ? err.message
+          : (err as { message?: string })?.message ?? "Failed to save order.";
+      console.error("handleSave caught error:", err);
+      setSaveError(msg);
     } finally {
       setIsSaving(false);
     }

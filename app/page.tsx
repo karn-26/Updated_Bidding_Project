@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 const features = [
   {
@@ -36,7 +38,15 @@ const steps = [
   { n: "03", title: "Accept & Fulfil", desc: "Pick the best offer, confirm, and track delivery — all in one place." },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (user) {
+    const role = user.user_metadata?.role as string | undefined;
+    redirect(role === "supplier" ? "/supplier/dashboard" : "/dashboard");
+  }
+
   return (
     <div className="flex flex-col">
       {/* ── Hero ── */}

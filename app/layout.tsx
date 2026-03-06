@@ -27,10 +27,21 @@ export default async function RootLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
+  let initialNotifications: { id: string; title: string; message: string; is_read: boolean; created_at: string }[] = [];
+  if (user) {
+    const { data } = await supabase
+      .from("notifications")
+      .select("id, title, message, is_read, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    initialNotifications = data ?? [];
+  }
+
   return (
     <html lang="en" className={inter.variable}>
       <body className="flex flex-col min-h-screen">
-        <Navbar user={user} />
+        <Navbar user={user} initialNotifications={initialNotifications} />
         <main className="flex-1">{children}</main>
         <Footer />
       </body>

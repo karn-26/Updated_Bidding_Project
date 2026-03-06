@@ -2,16 +2,10 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-const placeholderOrders = [
-  { id: "ord_001", title: "Weekly produce order",    status: "open",      bids: 3, deadline: "2026-03-10" },
-  { id: "ord_002", title: "Dry goods — pasta & rice", status: "open",      bids: 1, deadline: "2026-03-12" },
-  { id: "ord_003", title: "Dairy & cheese bundle",    status: "fulfilled", bids: 5, deadline: "2026-03-05" },
-];
-
 const statusConfig: Record<string, { label: string; cls: string }> = {
   open:      { label: "Open",      cls: "bg-emerald-100 text-emerald-700" },
-  fulfilled: { label: "Fulfilled", cls: "bg-slate-100 text-slate-600" },
-  cancelled: { label: "Cancelled", cls: "bg-red-100 text-red-600" },
+  closed:    { label: "Closed",    cls: "bg-slate-100 text-slate-600"    },
+  cancelled: { label: "Cancelled", cls: "bg-red-100 text-red-600"        },
 };
 
 export default async function DashboardPage() {
@@ -22,6 +16,19 @@ export default async function DashboardPage() {
   if (user.user_metadata?.role === "supplier") redirect("/supplier/dashboard");
 
   const businessName = user.user_metadata?.business_name ?? "there";
+
+  const { data: orders, error: ordersError } = await supabase
+    .from("orders")
+    .select(`id, title, status, deadline, bids ( id, status )`)
+    .eq("restaurant_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (ordersError) console.error("Supabase error fetching orders:", ordersError);
+
+  const rows = orders ?? [];
+  const openCount      = rows.filter((o) => o.status === "open").length;
+  const fulfilledCount = rows.filter((o) => o.status === "fulfilled").length;
+  const pendingBids    = rows.flatMap((o) => o.bids).filter((b) => b.status === "pending").length;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
@@ -47,9 +54,9 @@ export default async function DashboardPage() {
 
         {/* Stat cards */}
         <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard icon="📋" label="Open Orders"     value={2} trend="+1 this week" color="indigo" />
-          <StatCard icon="💬" label="Pending Bids"    value={4} trend="2 need review" color="amber" />
-          <StatCard icon="✅" label="Fulfilled Orders" value={1} trend="this month"   color="emerald" />
+          <StatCard icon="📋" label="Open Orders"     value={openCount}      color="indigo"  />
+          <StatCard icon="💬" label="Pending Bids"    value={pendingBids}    color="amber"   />
+          <StatCard icon="✅" label="Fulfilled Orders" value={fulfilledCount} color="emerald" />
         </div>
 
         {/* Orders table */}
@@ -62,19 +69,26 @@ export default async function DashboardPage() {
           </div>
 
           <div className="divide-y divide-slate-100">
-            {placeholderOrders.map((order) => {
-              const s = statusConfig[order.status];
+            {rows.map((order) => {
+              const s = statusConfig[order.status] ?? statusConfig.open;
+              const bidCount = order.bids.length;
               return (
                 <div key={order.id} className="group flex items-center justify-between gap-4 px-6 py-4 transition hover:bg-slate-50">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-900">{order.title}</p>
                     <p className="mt-0.5 text-xs text-slate-400">
                       Deadline {order.deadline} &middot;{" "}
-                      <span className="font-medium text-slate-600">{order.bids} bid{order.bids !== 1 ? "s" : ""}</span>
+                      <span className="font-medium text-slate-600">{bidCount} bid{bidCount !== 1 ? "s" : ""}</span>
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     <span className={`badge ${s.cls}`}>{s.label}</span>
+                    <Link
+                      href={`/orders/${order.id}`}
+                      className="hidden text-sm font-medium text-slate-600 hover:text-slate-900 hover:underline sm:block"
+                    >
+                      View details
+                    </Link>
                     <Link
                       href={`/bids?order=${order.id}`}
                       className="hidden text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline sm:block"
@@ -87,8 +101,7 @@ export default async function DashboardPage() {
             })}
           </div>
 
-          {/* Empty state placeholder */}
-          {placeholderOrders.length === 0 && (
+          {rows.length === 0 && (
             <div className="px-6 py-16 text-center">
               <p className="text-slate-400">No orders yet.</p>
               <Link href="/orders/new" className="btn-primary mt-4 inline-flex">Post your first order</Link>

@@ -1,12 +1,14 @@
 import Link from "next/link";
 import SignOutButton from "./SignOutButton";
+import NotificationBell, { type AppNotification } from "./NotificationBell";
 import type { User } from "@supabase/supabase-js";
 
 interface NavbarProps {
   user: User | null;
+  initialNotifications: AppNotification[];
 }
 
-export default function Navbar({ user }: NavbarProps) {
+export default function Navbar({ user, initialNotifications }: NavbarProps) {
   const role = user?.user_metadata?.role as string | undefined;
   const businessName = user?.user_metadata?.business_name as string | undefined;
 
@@ -26,7 +28,7 @@ export default function Navbar({ user }: NavbarProps) {
         {/* Nav links */}
         <nav className="hidden md:flex items-center gap-1">
           {user ? (
-            role === "restaurant_owner" ? (
+            role === "restaurant" ? (
               <>
                 <NavLink href="/dashboard">Dashboard</NavLink>
                 <NavLink href="/orders/new">Place Order</NavLink>
@@ -53,9 +55,10 @@ export default function Navbar({ user }: NavbarProps) {
                   {businessName ?? user.email}
                 </span>
                 <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
-                  {role === "supplier" ? "Supplier" : "Owner"}
+                  {role === "supplier" ? "Supplier" : "Restaurant"}
                 </span>
               </div>
+              <NotificationBell initialNotifications={initialNotifications} userId={user.id} />
               <SignOutButton />
             </>
           ) : (

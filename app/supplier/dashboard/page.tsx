@@ -1,42 +1,21 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import MyBidsPanel, { type SupplierBid } from "@/components/supplier/MyBidsPanel";
 
-const openOrders = [
-  {
-    id: "ord_001",
-    title: "Weekly produce order",
-    restaurant: "The Golden Fork",
-    items: ["Tomatoes 20kg", "Lettuce 10 heads", "Onions 15kg"],
-    deadline: "2026-03-10",
-    bids: 3,
-  },
-  {
-    id: "ord_002",
-    title: "Dry goods — pasta & rice",
-    restaurant: "Bella Cucina",
-    items: ["Pasta 50kg", "Rice 30kg", "Olive oil 10L"],
-    deadline: "2026-03-12",
-    bids: 1,
-  },
-  {
-    id: "ord_004",
-    title: "Fresh seafood delivery",
-    restaurant: "Harbour House",
-    items: ["Salmon fillet 8kg", "Prawns 5kg", "Sea bass 4kg"],
-    deadline: "2026-03-08",
-    bids: 0,
-  },
-];
+type OrderItem = {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+};
 
-const myBids = [
-  { id: "bid_001", order_title: "Weekly produce order",  price: 340, status: "pending"  },
-  { id: "bid_003", order_title: "Dairy & cheese bundle", price: 210, status: "accepted" },
-];
-
-const bidStatusConfig: Record<string, { label: string; cls: string }> = {
-  pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700"     },
-  accepted: { label: "Accepted", cls: "bg-emerald-100 text-emerald-700" },
-  rejected: { label: "Rejected", cls: "bg-red-100 text-red-600"         },
+type Order = {
+  id: string;
+  title: string;
+  deadline: string;
+  restaurant_id: string;
+  order_items: OrderItem[];
 };
 
 export default async function SupplierDashboardPage() {
@@ -44,9 +23,40 @@ export default async function SupplierDashboardPage() {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
-  if (user.user_metadata?.role === "restaurant_owner") redirect("/dashboard");
+  if (user.user_metadata?.role === "restaurant") redirect("/dashboard");
 
   const businessName = user.user_metadata?.business_name ?? "there";
+
+  const { data: openOrders, error: ordersError } = await supabase
+    .from("orders")
+    .select(`
+      id,
+      title,
+      deadline,
+      restaurant_id,
+      order_items (
+        id,
+        name,
+        quantity,
+        unit
+      )
+    `)
+    .eq("status", "open")
+    .order("deadline", { ascending: true });
+
+  if (ordersError) console.error("Supabase error fetching open orders:", ordersError);
+
+  const { data: myBidsData, error: bidsError } = await supabase
+    .from("bids")
+    .select(`id, order_id, price, status, orders ( title )`)
+    .eq("supplier_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (bidsError) console.error("Supabase error fetching supplier bids:", bidsError);
+
+  const orders: Order[] = openOrders ?? [];
+  const myBids = myBidsData ?? [];
+  const biddedOrderIds = new Set(myBids.map((b) => b.order_id));
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
@@ -64,9 +74,9 @@ export default async function SupplierDashboardPage() {
 
         {/* Stat cards */}
         <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard icon="📦" label="Open Orders Available" value={openOrders.length}                                   color="indigo" />
-          <StatCard icon="📝" label="Bids Placed"           value={myBids.length}                                      color="amber"  />
-          <StatCard icon="🏆" label="Bids Accepted"         value={myBids.filter((b) => b.status === "accepted").length} color="emerald" />
+          <StatCard icon="📦" label="Open Orders Available" value={orders.length}                                               color="indigo"  />
+          <StatCard icon="📝" label="Bids Placed"           value={myBids.length}                                               color="amber"   />
+          <StatCard icon="🏆" label="Bids Accepted"         value={myBids.filter((b) => b.status === "won").length}           color="emerald" />
         </div>
 
         <div className="grid gap-8 lg:grid-cols-3">
@@ -74,54 +84,60 @@ export default async function SupplierDashboardPage() {
           <div className="lg:col-span-2 space-y-4">
             <h2 className="font-semibold text-slate-900">Open Orders</h2>
 
-            {openOrders.map((order) => (
+            {orders.length === 0 && (
+              <div className="card p-10 text-center">
+                <p className="text-slate-400">No open orders at the moment. Check back soon.</p>
+              </div>
+            )}
+
+            {orders.map((order) => (
               <div key={order.id} className="card p-6 transition hover:shadow-card-hover">
                 {/* Order header */}
                 <div className="mb-3 flex items-start justify-between gap-4">
                   <div>
                     <h3 className="font-bold text-slate-900">{order.title}</h3>
                     <p className="mt-0.5 text-xs text-slate-400">
-                      {order.restaurant} &middot; Deadline {order.deadline} &middot;{" "}
-                      <span className="font-medium text-slate-600">{order.bids} bid{order.bids !== 1 ? "s" : ""}</span>
+                      Deadline{" "}
+                      <span className="font-medium text-slate-600">{order.deadline}</span>
+                      {" "}&middot;{" "}
+                      {order.order_items.length} item{order.order_items.length !== 1 ? "s" : ""}
                     </p>
                   </div>
                   <span className="badge shrink-0 bg-emerald-100 text-emerald-700">Open</span>
                 </div>
 
                 {/* Item tags */}
-                <ul className="mb-4 flex flex-wrap gap-2">
-                  {order.items.map((item) => (
-                    <li key={item} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                      {item}
-                    </li>
-                  ))}
-                </ul>
+                {order.order_items.length > 0 && (
+                  <ul className="mb-4 flex flex-wrap gap-2">
+                    {order.order_items.map((item) => (
+                      <li
+                        key={item.id}
+                        className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600"
+                      >
+                        {item.quantity} {item.unit} {item.name}
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
-                {/* Inline bid form */}
-                <form className="flex gap-2 border-t border-slate-100 pt-4">
-                  <input type="hidden" name="order_id" value={order.id} />
-                  <input
-                    type="number"
-                    name="price"
-                    min="0"
-                    step="0.01"
-                    required
-                    placeholder="Your price ($)"
-                    className="input flex-1"
-                  />
-                  <input
-                    type="text"
-                    name="notes"
-                    placeholder="Notes (optional)"
-                    className="input flex-1"
-                  />
-                  <button
-                    type="submit"
-                    className="btn-primary shrink-0 px-5"
-                  >
-                    Bid
-                  </button>
-                </form>
+                {/* Place a bid / already bid */}
+                <div className="border-t border-slate-100 pt-4">
+                  {biddedOrderIds.has(order.id) ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                      Bid Submitted
+                    </span>
+                  ) : (
+                    <Link
+                      href={`/supplier/bids/new?order_id=${order.id}`}
+                      className="btn-primary inline-flex px-6"
+                    >
+                      Place a Bid
+                    </Link>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -129,25 +145,10 @@ export default async function SupplierDashboardPage() {
           {/* ── My bids sidebar ── */}
           <div className="space-y-3">
             <h2 className="font-semibold text-slate-900">My Bids</h2>
-
-            {myBids.map((bid) => {
-              const s = bidStatusConfig[bid.status];
-              return (
-                <div key={bid.id} className="card p-4">
-                  <p className="mb-2 text-sm font-semibold text-slate-800 leading-snug">{bid.order_title}</p>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xl font-extrabold text-slate-900">${bid.price}</p>
-                    <span className={`badge ${s.cls}`}>{s.label}</span>
-                  </div>
-                </div>
-              );
-            })}
-
-            {myBids.length === 0 && (
-              <div className="card p-6 text-center">
-                <p className="text-sm text-slate-400">No bids placed yet.</p>
-              </div>
-            )}
+            <MyBidsPanel
+              initialBids={myBids as SupplierBid[]}
+              userId={user.id}
+            />
           </div>
         </div>
       </div>

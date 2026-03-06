@@ -1,40 +1,78 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Bid } from "@/types";
-
-const placeholderBids: (Bid & { order_title: string })[] = [
-  {
-    id: "bid_001", order_id: "ord_001", order_title: "Weekly produce order",
-    supplier_id: "sup_01", supplier_name: "Green Valley Farms",
-    price: 340, notes: "Same-day delivery available. All organic certified.",
-    status: "pending", created_at: "2026-03-05T09:00:00Z",
-  },
-  {
-    id: "bid_002", order_id: "ord_001", order_title: "Weekly produce order",
-    supplier_id: "sup_02", supplier_name: "City Fresh Co.",
-    price: 295, notes: "Next-morning delivery. Minimum order $200.",
-    status: "pending", created_at: "2026-03-05T11:30:00Z",
-  },
-  {
-    id: "bid_003", order_id: "ord_002", order_title: "Dry goods — pasta & rice",
-    supplier_id: "sup_03", supplier_name: "Metro Wholesale",
-    price: 180, notes: "Bulk pricing applied. Can split delivery if needed.",
-    status: "accepted", created_at: "2026-03-04T14:00:00Z",
-  },
-];
+import { acceptBid, rejectBid } from "./actions";
 
 const statusConfig: Record<string, { label: string; cls: string }> = {
-  pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700" },
-  accepted: { label: "Accepted", cls: "bg-emerald-100 text-emerald-700" },
-  rejected: { label: "Rejected", cls: "bg-red-100 text-red-600" },
+  pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700"   },
+  won:      { label: "Accepted", cls: "bg-emerald-100 text-emerald-700" },
+  rejected: { label: "Rejected", cls: "bg-red-100 text-red-600"       },
 };
 
-export default async function BidsPage() {
+// Maps the URL ?status= value to the DB status stored in Supabase
+const STATUS_MAP: Record<string, string> = {
+  pending:  "pending",
+  accepted: "won",
+  rejected: "rejected",
+};
+
+const TABS = [
+  { label: "All",      key: null       },
+  { label: "Pending",  key: "pending"  },
+  { label: "Accepted", key: "accepted" },
+  { label: "Rejected", key: "rejected" },
+];
+
+export default async function BidsPage({
+  searchParams,
+}: {
+  searchParams: { order?: string; status?: string };
+}) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
+
+  const orderFilter = searchParams.order ?? null;
+  const activeTab   = searchParams.status ?? null;  // e.g. "pending" | "accepted" | "rejected" | null
+  const dbStatus    = activeTab ? (STATUS_MAP[activeTab] ?? null) : null;
+
+  // When filtering by order, fetch its title for the header (handles zero-bids case too)
+  let orderTitle: string | null = null;
+  if (orderFilter) {
+    const { data: orderRow } = await supabase
+      .from("orders")
+      .select("title")
+      .eq("id", orderFilter)
+      .eq("restaurant_id", user.id)
+      .single();
+    orderTitle = orderRow?.title ?? null;
+  }
+
+  let query = supabase
+    .from("bids")
+    .select(`
+      id,
+      order_id,
+      supplier_id,
+      supplier_name,
+      price,
+      notes,
+      status,
+      created_at,
+      orders!inner ( title, restaurant_id )
+    `)
+    .eq("orders.restaurant_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (orderFilter) query = query.eq("order_id", orderFilter);
+  if (dbStatus)    query = query.eq("status", dbStatus);
+
+  const { data: bidsData, error: bidsError } = await query;
+
+  if (bidsError) console.error("Supabase error fetching bids:", bidsError);
+
+  const bids = bidsData ?? [];
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
@@ -43,9 +81,24 @@ export default async function BidsPage() {
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">Bids</h1>
+            {orderFilter && (
+              <Link
+                href="/dashboard"
+                className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-800"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                </svg>
+                Back to Dashboard
+              </Link>
+            )}
+            <h1 className="text-2xl font-extrabold text-slate-900">
+              {orderTitle ? `Bids for "${orderTitle}"` : "All Bids"}
+            </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Review and respond to supplier bids on your orders.
+              {orderFilter
+                ? `${bids.length} bid${bids.length !== 1 ? "s" : ""} received on this order.`
+                : "Review and respond to supplier bids on your orders."}
             </p>
           </div>
           <Link href="/orders/new" className="btn-primary self-start sm:self-auto">
@@ -58,31 +111,40 @@ export default async function BidsPage() {
 
         {/* Filter tabs */}
         <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-1">
-          {["All", "Pending", "Accepted", "Rejected"].map((tab, i) => (
-            <button
-              key={tab}
-              className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                i === 0
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
+          {TABS.map(({ label, key }) => {
+            const isActive = activeTab === key;
+            const params = new URLSearchParams();
+            if (orderFilter) params.set("order", orderFilter);
+            if (key)         params.set("status", key);
+            const href = `/bids${params.size > 0 ? `?${params}` : ""}`;
+            return (
+              <Link
+                key={label}
+                href={href}
+                className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {label}
+              </Link>
+            );
+          })}
         </div>
 
         {/* Bid cards */}
         <div className="space-y-4">
-          {placeholderBids.map((bid) => {
-            const s = statusConfig[bid.status];
+          {bids.map((bid) => {
+            const s = statusConfig[bid.status] ?? statusConfig.pending;
+            const orderTitle = (bid.orders as { title: string } | null)?.title ?? "—";
             return (
               <div key={bid.id} className="card p-6 transition hover:shadow-card-hover">
                 {/* Top row */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-                      {bid.order_title}
+                      {orderTitle}
                     </p>
                     <h3 className="truncate text-lg font-bold text-slate-900">{bid.supplier_name}</h3>
                     <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{bid.notes}</p>
@@ -99,16 +161,28 @@ export default async function BidsPage() {
                 {/* Actions */}
                 {bid.status === "pending" && (
                   <div className="mt-5 flex gap-3 border-t border-slate-100 pt-4">
-                    <button className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.98]">
-                      Accept bid
-                    </button>
-                    <button className="btn-danger flex-1">
-                      Decline
-                    </button>
+                    <form action={acceptBid}>
+                      <input type="hidden" name="bid_id" value={bid.id} />
+                      <input type="hidden" name="order_id" value={bid.order_id} />
+                      <button
+                        type="submit"
+                        className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.98]"
+                      >
+                        Accept bid
+                      </button>
+                    </form>
+                    <form action={rejectBid}>
+                      <input type="hidden" name="bid_id"      value={bid.id} />
+                      <input type="hidden" name="supplier_id" value={bid.supplier_id} />
+                      <input type="hidden" name="order_id"    value={bid.order_id} />
+                      <button type="submit" className="btn-danger">
+                        Decline
+                      </button>
+                    </form>
                   </div>
                 )}
 
-                {bid.status === "accepted" && (
+                {bid.status === "won" && (
                   <div className="mt-5 flex items-center gap-2 border-t border-slate-100 pt-4">
                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100">
                       <svg className="h-3.5 w-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -123,11 +197,19 @@ export default async function BidsPage() {
           })}
         </div>
 
-        {placeholderBids.length === 0 && (
+        {bids.length === 0 && (
           <div className="card py-20 text-center">
-            <p className="text-slate-400">No bids received yet.</p>
-            <p className="mt-1 text-sm text-slate-400">Post an order to start receiving bids from suppliers.</p>
-            <Link href="/orders/new" className="btn-primary mx-auto mt-6 inline-flex">Post an order</Link>
+            <p className="text-slate-400">
+              {orderFilter ? "No bids received on this order yet." : "No bids received yet."}
+            </p>
+            <p className="mt-1 text-sm text-slate-400">
+              {orderFilter
+                ? "Suppliers will be able to submit bids while the order is open."
+                : "Post an order to start receiving bids from suppliers."}
+            </p>
+            {!orderFilter && (
+              <Link href="/orders/new" className="btn-primary mx-auto mt-6 inline-flex">Post an order</Link>
+            )}
           </div>
         )}
       </div>

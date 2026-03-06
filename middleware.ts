@@ -56,7 +56,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Cross-role protection: owner trying to access supplier routes → redirect
-  if (user && role === "restaurant_owner" && pathname.startsWith("/supplier")) {
+  if (user && role === "restaurant" && pathname.startsWith("/supplier")) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
