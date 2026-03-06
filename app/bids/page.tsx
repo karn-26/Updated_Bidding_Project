@@ -137,7 +137,7 @@ export default async function BidsPage({
         <div className="space-y-4">
           {bids.map((bid) => {
             const s = statusConfig[bid.status] ?? statusConfig.pending;
-            const orderTitle = (bid.orders as { title: string } | null)?.title ?? "—";
+            const orderTitle = (bid.orders as { title: string }[] | null)?.[0]?.title ?? "—";
             return (
               <div key={bid.id} className="card p-6 transition hover:shadow-card-hover">
                 {/* Top row */}
