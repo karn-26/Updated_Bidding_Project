@@ -68,7 +68,7 @@ export default function QuickOrderButton({ presetId, presetName }: Props) {
   return (
     <div className="space-y-2">
       <div>
-        <label className="label mb-1 text-xs">Bid deadline for "{presetName}"</label>
+        <label className="label mb-1 text-xs">Bid deadline for &quot;{presetName}&quot;</label>
         <input
           type="date"
           value={deadline}

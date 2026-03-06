@@ -199,7 +199,7 @@ export default function PresetsClient({ presets: initialPresets }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             </svg>
             <p className="text-sm font-semibold text-emerald-800">
-              Order placed for <span className="font-bold">"{successName}"</span> — suppliers will be notified shortly.
+              Order placed for <span className="font-bold">&quot;{successName}&quot;</span> — suppliers will be notified shortly.
             </p>
           </div>
         )}
@@ -261,7 +261,7 @@ export default function PresetsClient({ presets: initialPresets }: Props) {
               {voiceTranscript && !isListening && (
                 <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-2.5 text-sm text-slate-700">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 mr-2">Heard:</span>
-                  "{voiceTranscript}"
+                  &quot;{voiceTranscript}&quot;
                 </div>
               )}
 
@@ -321,7 +321,7 @@ export default function PresetsClient({ presets: initialPresets }: Props) {
             <div>
               <p className="font-semibold text-slate-700">No presets yet</p>
               <p className="mt-1 text-sm text-slate-400">
-                When placing a new order, check "Save as preset" to save it here for quick reordering.
+                When placing a new order, check &quot;Save as preset&quot; to save it here for quick reordering.
               </p>
             </div>
             <Link href="/orders/new" className="btn-primary mt-2">Place your first order</Link>

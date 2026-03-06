@@ -52,10 +52,6 @@ export default function NewOrderPage() {
   const [speechSupported, setSpeechSupported] = useState(true);
   const recognitionRef = useRef<unknown>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const shouldRestartSpeechRef = useRef(false);
-  const finalTranscriptRef = useRef("");
 
   // ── Extraction ───────────────────────────────────────────────────────────
   const [extractingMsgIdx, setExtractingMsgIdx] = useState(0);
