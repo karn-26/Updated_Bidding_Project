@@ -9,7 +9,7 @@ export type SupplierBid = {
   order_id: string;
   price: number;
   status: string;
-  orders: { title: string } | null;
+  orders: { title: string }[] | null;
 };
 
 const statusConfig: Record<string, { label: string; badgeCls: string; cardCls: string }> = {
@@ -130,7 +130,7 @@ export default function MyBidsPanel({
       ) : (
         visibleBids.map((bid) => {
           const s          = statusConfig[bid.status] ?? statusConfig.pending;
-          const orderTitle = bid.orders?.title ?? "—";
+          const orderTitle = bid.orders?.[0]?.title ?? "—";
           const isWon      = bid.status === "won";
           const isRejected = bid.status === "rejected";
           const isPending  = bid.status === "pending";

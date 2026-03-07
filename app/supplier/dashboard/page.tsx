@@ -61,7 +61,10 @@ export default async function SupplierDashboardPage() {
   if (bidsError) console.error("Supabase error fetching supplier bids:", bidsError);
 
   const orders: Order[] = openOrders ?? [];
-  const myBids = myBidsData ?? [];
+  const myBids: SupplierBid[] = (myBidsData ?? []).map((bid) => ({
+    ...bid,
+    orders: bid.orders ? [bid.orders as { title: string }] : null,
+  }));
   const biddedOrderIds = new Set(myBids.map((b) => b.order_id));
 
   return (
@@ -152,7 +155,7 @@ export default async function SupplierDashboardPage() {
           <div className="space-y-3">
             <h2 className="font-semibold text-slate-900">My Bids</h2>
             <MyBidsPanel
-              initialBids={myBids as SupplierBid[]}
+              initialBids={myBids}
               userId={user.id}
             />
           </div>
