@@ -63,7 +63,7 @@ export default async function SupplierDashboardPage() {
   const orders: Order[] = openOrders ?? [];
   const myBids: SupplierBid[] = (myBidsData ?? []).map((bid) => ({
     ...bid,
-    orders: bid.orders ? [bid.orders as { title: string }] : null,
+    orders: bid.orders as { title: string }[] | null,
   }));
   const biddedOrderIds = new Set(myBids.map((b) => b.order_id));
 
