@@ -13,9 +13,10 @@ const statusConfig: Record<string, { label: string; cardCls: string; badgeCls: s
 export default async function BidDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const supabase = createClient();
+  const { id } = await params;
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
@@ -24,7 +25,7 @@ export default async function BidDetailPage({
   const { data: bid, error: bidError } = await supabase
     .from("bids")
     .select("id, order_id, price, delivery_date, notes, status, created_at")
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("supplier_id", user.id)
     .single();
 

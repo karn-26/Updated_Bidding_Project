@@ -11,9 +11,10 @@ const statusConfig: Record<string, { label: string; cls: string }> = {
 export default async function OrderDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const supabase = createClient();
+  const { id } = await params;
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
@@ -22,7 +23,7 @@ export default async function OrderDetailPage({
   const { data: order, error: orderError } = await supabase
     .from("orders")
     .select("id, title, status, deadline, created_at")
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("restaurant_id", user.id)
     .single();
 
@@ -33,7 +34,7 @@ export default async function OrderDetailPage({
   const { data: items, error: itemsError } = await supabase
     .from("order_items")
     .select("id, name, quantity, unit")
-    .eq("order_id", params.id)
+    .eq("order_id", id)
     .order("id");
 
   if (itemsError) console.error("Error fetching order items:", itemsError);

@@ -23,7 +23,7 @@ import { revalidatePath } from "next/cache";
 export type PresetItem = { name: string; quantity: number; unit: string };
 
 export async function createPreset(name: string, items: PresetItem[]) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
@@ -40,7 +40,7 @@ export async function createPreset(name: string, items: PresetItem[]) {
 }
 
 export async function deletePreset(id: string) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
@@ -57,7 +57,7 @@ export async function deletePreset(id: string) {
 }
 
 export async function placeOrderFromPreset(presetId: string, deadline: string) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 

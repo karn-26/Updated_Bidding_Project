@@ -10,7 +10,7 @@ export type Preset = {
 };
 
 export default async function PresetsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");

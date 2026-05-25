@@ -3,12 +3,12 @@
 import { createClient } from "@/lib/supabase/server";
 
 export async function markNotificationRead(id: string) {
-  const supabase = createClient();
+  const supabase = await createClient();
   await supabase.from("notifications").update({ is_read: true }).eq("id", id);
 }
 
 export async function markAllNotificationsRead() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
   await supabase

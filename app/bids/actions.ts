@@ -15,7 +15,7 @@ export async function acceptBid(formData: FormData) {
     return;
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
 
   // Verify the session is active
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -116,7 +116,7 @@ export async function rejectBid(formData: FormData) {
   const supplierId = formData.get("supplier_id") as string | null;
   const orderId    = formData.get("order_id")    as string | null;
 
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { error } = await supabase
     .from("bids")

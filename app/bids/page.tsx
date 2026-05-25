@@ -26,15 +26,16 @@ const TABS = [
 export default async function BidsPage({
   searchParams,
 }: {
-  searchParams: { order?: string; status?: string };
+  searchParams: Promise<{ order?: string; status?: string }>;
 }) {
-  const supabase = createClient();
+  const { order, status } = await searchParams;
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
 
-  const orderFilter = searchParams.order ?? null;
-  const activeTab   = searchParams.status ?? null;  // e.g. "pending" | "accepted" | "rejected" | null
+  const orderFilter = order ?? null;
+  const activeTab   = status ?? null;  // e.g. "pending" | "accepted" | "rejected" | null
   const dbStatus    = activeTab ? (STATUS_MAP[activeTab] ?? null) : null;
 
   // When filtering by order, fetch its title for the header (handles zero-bids case too)

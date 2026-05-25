@@ -7,7 +7,7 @@ export async function updateBid(
   bidId: string,
   data: { price: number; delivery_date: string; notes: string }
 ) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
