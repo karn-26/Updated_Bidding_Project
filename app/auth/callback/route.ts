@@ -11,7 +11,9 @@ export async function GET(request: Request) {
 
     if (!error && data.user) {
       const role = data.user.user_metadata?.role;
-      const dest = role === "supplier" ? "/supplier/dashboard" : "/dashboard";
+      let dest = "/dashboard";
+      if (role === "supplier") dest = "/supplier/dashboard";
+      else if (role === "delivery_partner") dest = "/delivery/dashboard";
       return NextResponse.redirect(new URL(dest, origin));
     }
   }

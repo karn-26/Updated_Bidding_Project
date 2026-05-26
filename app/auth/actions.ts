@@ -41,8 +41,10 @@ export async function signUp(formData: FormData) {
     });
   }
 
-  // Email confirmation enabled: tell user to check their inbox
-  return redirect("/auth/confirm");
+  // Email confirmation is disabled — redirect straight to the role dashboard.
+  if (role === "supplier") return redirect("/supplier/dashboard");
+  if (role === "delivery_partner") return redirect("/delivery/dashboard");
+  return redirect("/dashboard");
 }
 
 export async function signIn(formData: FormData) {
