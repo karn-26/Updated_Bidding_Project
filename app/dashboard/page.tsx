@@ -34,7 +34,12 @@ export default async function DashboardPage() {
     .eq("restaurant_id", user.id)
     .order("created_at", { ascending: false });
 
-  if (ordersError) console.error("Supabase error fetching orders:", ordersError);
+  if (ordersError) console.error("Supabase error fetching orders:", {
+    message: ordersError.message,
+    code:    ordersError.code,
+    details: ordersError.details,
+    hint:    ordersError.hint,
+  });
 
   const { data: presets } = await supabase
     .from("order_presets")
