@@ -1,23 +1,24 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 
 export async function signUp(formData: FormData) {
   const supabase = await createClient();
 
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const role = formData.get("role") as string;
+  const email         = formData.get("email")         as string;
+  const password      = formData.get("password")      as string;
+  const role          = formData.get("role")          as string;
   const business_name = formData.get("business_name") as string;
+  const city          = formData.get("city")          as string | null;
+  const country       = formData.get("country")       as string | null;
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: { role, business_name },
-      // Make sure this matches the redirect URL configured in your Supabase project:
-      // Authentication → URL Configuration → Redirect URLs → http://localhost:3000/auth/callback
+      data: { role, business_name, city: city ?? null, country: country ?? null },
       emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/auth/callback`,
     },
   });
@@ -28,6 +29,18 @@ export async function signUp(formData: FormData) {
     );
   }
 
+  // For delivery partners, seed their profile row immediately so the
+  // delivery_partners table has a record even before they fill out settings.
+  if (role === "delivery_partner" && data.user) {
+    const admin = createAdminClient();
+    await admin.from("delivery_partners").upsert({
+      id: data.user.id,
+      business_name: business_name || "New Delivery Partner",
+      city: city ?? null,
+      country: country ?? null,
+    });
+  }
+
   // Email confirmation enabled: tell user to check their inbox
   return redirect("/auth/confirm");
 }
@@ -35,7 +48,7 @@ export async function signUp(formData: FormData) {
 export async function signIn(formData: FormData) {
   const supabase = await createClient();
 
-  const email = formData.get("email") as string;
+  const email    = formData.get("email")    as string;
   const password = formData.get("password") as string;
 
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -50,7 +63,9 @@ export async function signIn(formData: FormData) {
   }
 
   const role = data.user?.user_metadata?.role;
-  redirect(role === "supplier" ? "/supplier/dashboard" : "/dashboard");
+  if (role === "supplier") redirect("/supplier/dashboard");
+  else if (role === "delivery_partner") redirect("/delivery/dashboard");
+  else redirect("/dashboard");
 }
 
 export async function signOut() {

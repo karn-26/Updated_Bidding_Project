@@ -10,24 +10,20 @@ export type SupplierBid = {
   price: number;
   status: string;
   orders: { title: string }[] | null;
+  deliveryStatus?: string | null;
 };
 
 const statusConfig: Record<string, { label: string; badgeCls: string; cardCls: string }> = {
-  pending:  {
-    label: "Pending",
-    badgeCls: "bg-amber-100 text-amber-700",
-    cardCls:  "border-slate-200",
-  },
-  won:      {
-    label: "Accepted",
-    badgeCls: "bg-emerald-100 text-emerald-800",
-    cardCls:  "border-emerald-300 bg-emerald-50",
-  },
-  rejected: {
-    label: "Rejected",
-    badgeCls: "bg-red-100 text-red-700",
-    cardCls:  "border-red-300 bg-red-50",
-  },
+  pending:  { label: "Pending",  badgeCls: "bg-amber-100 text-amber-700",   cardCls: "border-slate-200"              },
+  won:      { label: "Accepted", badgeCls: "bg-emerald-100 text-emerald-800", cardCls: "border-emerald-300 bg-emerald-50" },
+  rejected: { label: "Rejected", badgeCls: "bg-red-100 text-red-700",        cardCls: "border-red-300 bg-red-50"      },
+};
+
+const deliveryStatusLabel: Record<string, string> = {
+  pending:   "Awaiting delivery partner",
+  claimed:   "Delivery claimed — en route",
+  picked_up: "Picked up — on the way",
+  delivered: "Delivered ✓",
 };
 
 type TabKey = "all" | "pending" | "won" | "rejected";
@@ -46,7 +42,7 @@ export default function MyBidsPanel({
   initialBids: SupplierBid[];
   userId: string;
 }) {
-  const [bids, setBids]       = useState<SupplierBid[]>(initialBids);
+  const [bids, setBids]           = useState<SupplierBid[]>(initialBids);
   const [activeTab, setActiveTab] = useState<TabKey>("all");
 
   useEffect(() => {
@@ -56,31 +52,53 @@ export default function MyBidsPanel({
       .channel("supplier-bids-realtime")
       .on(
         "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "bids",
-          filter: `supplier_id=eq.${userId}`,
-        },
+        { event: "INSERT", schema: "public", table: "bids", filter: `supplier_id=eq.${userId}` },
+        async (payload) => {
+          const row = payload.new as { id: string; order_id: string; price: number; status: string };
+          const { data: order } = await supabase
+            .from("orders")
+            .select("title")
+            .eq("id", row.order_id)
+            .single();
+          setBids((prev) => {
+            if (prev.some((b) => b.id === row.id)) return prev;
+            return [
+              { id: row.id, order_id: row.order_id, price: row.price, status: row.status, orders: order ? [{ title: order.title }] : null },
+              ...prev,
+            ];
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "bids", filter: `supplier_id=eq.${userId}` },
         (payload) => {
           const updated = payload.new as { id: string; status: string; price: number };
           setBids((prev) =>
             prev.map((bid) =>
-              bid.id === updated.id
-                ? { ...bid, status: updated.status, price: updated.price }
-                : bid
+              bid.id === updated.id ? { ...bid, status: updated.status, price: updated.price } : bid
+            )
+          );
+        }
+      )
+      // Listen for delivery status changes on won bids
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "deliveries", filter: `supplier_id=eq.${userId}` },
+        (payload) => {
+          const updated = payload.new as { bid_id: string; status: string };
+          setBids((prev) =>
+            prev.map((bid) =>
+              bid.id === updated.bid_id ? { ...bid, deliveryStatus: updated.status } : bid
             )
           );
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [userId]);
 
-  // Counts per tab (always computed from full bids list, not filtered)
   const counts: Record<TabKey, number> = {
     all:      bids.length,
     pending:  bids.filter((b) => b.status === "pending").length,
@@ -88,8 +106,7 @@ export default function MyBidsPanel({
     rejected: bids.filter((b) => b.status === "rejected").length,
   };
 
-  const visibleBids =
-    activeTab === "all" ? bids : bids.filter((b) => b.status === activeTab);
+  const visibleBids = activeTab === "all" ? bids : bids.filter((b) => b.status === activeTab);
 
   return (
     <div className="space-y-3">
@@ -102,17 +119,11 @@ export default function MyBidsPanel({
               key={key}
               onClick={() => setActiveTab(key)}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                isActive
-                  ? activeCls
-                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                isActive ? activeCls : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
               {label}
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-                  isActive ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
-                }`}
-              >
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${isActive ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"}`}>
                 {counts[key]}
               </span>
             </button>
@@ -138,9 +149,7 @@ export default function MyBidsPanel({
 
           const cardContent = (
             <>
-              <p className="mb-2 text-sm font-semibold leading-snug text-slate-800">
-                {orderTitle}
-              </p>
+              <p className="mb-2 text-sm font-semibold leading-snug text-slate-800">{orderTitle}</p>
 
               <div className="flex items-center justify-between gap-2">
                 <p className={`text-xl font-extrabold ${isWon ? "text-emerald-700" : isRejected ? "text-red-600" : "text-slate-900"}`}>
@@ -163,19 +172,26 @@ export default function MyBidsPanel({
                 </p>
               )}
               {isWon && (
-                <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  Your bid was accepted — tap to view details
-                </p>
+                <>
+                  <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    Your bid was accepted
+                  </p>
+                  {bid.deliveryStatus && (
+                    <p className={`mt-1 text-xs font-medium ${bid.deliveryStatus === "delivered" ? "text-emerald-600" : "text-slate-500"}`}>
+                      🚚 {deliveryStatusLabel[bid.deliveryStatus] ?? bid.deliveryStatus}
+                    </p>
+                  )}
+                </>
               )}
               {isRejected && (
                 <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-red-500">
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                  This bid was not selected — tap to view details
+                  This bid was not selected
                 </p>
               )}
             </>

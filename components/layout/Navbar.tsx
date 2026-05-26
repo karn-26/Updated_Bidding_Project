@@ -12,6 +12,13 @@ export default function Navbar({ user, initialNotifications }: NavbarProps) {
   const role = user?.user_metadata?.role as string | undefined;
   const businessName = user?.user_metadata?.business_name as string | undefined;
 
+  const roleLabel =
+    role === "supplier"
+      ? "Supplier"
+      : role === "delivery_partner"
+      ? "Delivery"
+      : "Restaurant";
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -28,16 +35,26 @@ export default function Navbar({ user, initialNotifications }: NavbarProps) {
         {/* Nav links */}
         <nav className="hidden md:flex items-center gap-1">
           {user ? (
-            role === "restaurant" ? (
+            role === "restaurant_owner" ? (
               <>
                 <NavLink href="/dashboard">Dashboard</NavLink>
                 <NavLink href="/orders/new">Place Order</NavLink>
                 <NavLink href="/presets">Presets</NavLink>
                 <NavLink href="/bids">My Bids</NavLink>
+                <NavLink href="/supplier/directory">Suppliers</NavLink>
+                <NavLink href="/settings">Settings</NavLink>
               </>
-            ) : (
-              <NavLink href="/supplier/dashboard">Dashboard</NavLink>
-            )
+            ) : role === "supplier" ? (
+              <>
+                <NavLink href="/supplier/dashboard">Dashboard</NavLink>
+                <NavLink href="/supplier/settings">Settings</NavLink>
+              </>
+            ) : role === "delivery_partner" ? (
+              <>
+                <NavLink href="/delivery/dashboard">Dashboard</NavLink>
+                <NavLink href="/delivery/settings">Settings</NavLink>
+              </>
+            ) : null
           ) : (
             <>
               <NavLink href="/#how-it-works">How it works</NavLink>
@@ -56,7 +73,7 @@ export default function Navbar({ user, initialNotifications }: NavbarProps) {
                   {businessName ?? user.email}
                 </span>
                 <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
-                  {role === "supplier" ? "Supplier" : "Restaurant"}
+                  {roleLabel}
                 </span>
               </div>
               <NotificationBell initialNotifications={initialNotifications} userId={user.id} />

@@ -35,29 +35,54 @@ export async function middleware(request: NextRequest) {
 
   // If logged in and on an auth page → redirect to their dashboard
   if (user && pathname.startsWith("/auth")) {
-    const dest = role === "supplier" ? "/supplier/dashboard" : "/dashboard";
+    let dest = "/dashboard";
+    if (role === "supplier") dest = "/supplier/dashboard";
+    else if (role === "delivery_partner") dest = "/delivery/dashboard";
     return NextResponse.redirect(new URL(dest, request.url));
   }
 
-  // Protect restaurant-owner routes
+  // Protect all app routes — unauthenticated users go to login
   if (
     !user &&
     (pathname.startsWith("/dashboard") ||
       pathname.startsWith("/orders") ||
       pathname.startsWith("/bids") ||
-      pathname.startsWith("/supplier"))
+      pathname.startsWith("/supplier") ||
+      pathname.startsWith("/delivery") ||
+      pathname.startsWith("/presets") ||
+      pathname.startsWith("/settings"))
   ) {
     return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
-  // Cross-role protection: supplier trying to access owner routes → redirect
-  if (user && role === "supplier" && pathname.startsWith("/dashboard")) {
-    return NextResponse.redirect(new URL("/supplier/dashboard", request.url));
+  // Cross-role protection: supplier/delivery trying to access restaurant routes
+  if (
+    user &&
+    (role === "supplier" || role === "delivery_partner") &&
+    pathname.startsWith("/dashboard")
+  ) {
+    const dest = role === "supplier" ? "/supplier/dashboard" : "/delivery/dashboard";
+    return NextResponse.redirect(new URL(dest, request.url));
   }
 
-  // Cross-role protection: owner trying to access supplier routes → redirect
-  if (user && role === "restaurant" && pathname.startsWith("/supplier")) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  // Cross-role protection: restaurant/delivery trying to access supplier routes
+  if (
+    user &&
+    role !== "supplier" &&
+    pathname.startsWith("/supplier")
+  ) {
+    const dest = role === "delivery_partner" ? "/delivery/dashboard" : "/dashboard";
+    return NextResponse.redirect(new URL(dest, request.url));
+  }
+
+  // Cross-role protection: restaurant/supplier trying to access delivery routes
+  if (
+    user &&
+    role !== "delivery_partner" &&
+    pathname.startsWith("/delivery")
+  ) {
+    const dest = role === "supplier" ? "/supplier/dashboard" : "/dashboard";
+    return NextResponse.redirect(new URL(dest, request.url));
   }
 
   return supabaseResponse;
@@ -69,6 +94,9 @@ export const config = {
     "/orders/:path*",
     "/bids/:path*",
     "/supplier/:path*",
+    "/delivery/:path*",
+    "/presets/:path*",
+    "/settings/:path*",
     "/auth/:path*",
   ],
 };
