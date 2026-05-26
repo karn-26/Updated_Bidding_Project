@@ -4,12 +4,11 @@ import { redirect } from "next/navigation";
 import { acceptBid, rejectBid } from "./actions";
 
 const statusConfig: Record<string, { label: string; cls: string }> = {
-  pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700"   },
+  pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700"    },
   won:      { label: "Accepted", cls: "bg-emerald-100 text-emerald-700" },
-  rejected: { label: "Rejected", cls: "bg-red-100 text-red-600"       },
+  rejected: { label: "Rejected", cls: "bg-red-100 text-red-600"        },
 };
 
-// Maps the URL ?status= value to the DB status stored in Supabase
 const STATUS_MAP: Record<string, string> = {
   pending:  "pending",
   accepted: "won",
@@ -23,22 +22,30 @@ const TABS = [
   { label: "Rejected", key: "rejected" },
 ];
 
+type ProfileRow = {
+  id: string;
+  city: string | null;
+  country: string | null;
+  average_rating: number;
+  total_ratings: number;
+};
+
 export default async function BidsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string; status?: string }>;
+  searchParams: Promise<{ order?: string; status?: string; rated?: string }>;
 }) {
-  const { order, status } = await searchParams;
+  const { order, status, rated } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
 
   const orderFilter = order ?? null;
-  const activeTab   = status ?? null;  // e.g. "pending" | "accepted" | "rejected" | null
+  const activeTab   = status ?? null;
   const dbStatus    = activeTab ? (STATUS_MAP[activeTab] ?? null) : null;
 
-  // When filtering by order, fetch its title for the header (handles zero-bids case too)
+  // When filtering by order, fetch its title for the header
   let orderTitle: string | null = null;
   if (orderFilter) {
     const { data: orderRow } = await supabase
@@ -50,6 +57,7 @@ export default async function BidsPage({
     orderTitle = orderRow?.title ?? null;
   }
 
+  // ── Fetch bids ─────────────────────────────────────────────────────────────
   let query = supabase
     .from("bids")
     .select(`
@@ -70,14 +78,66 @@ export default async function BidsPage({
   if (dbStatus)    query = query.eq("status", dbStatus);
 
   const { data: bidsData, error: bidsError } = await query;
-
   if (bidsError) console.error("Supabase error fetching bids:", bidsError);
-
   const bids = bidsData ?? [];
+
+  // ── Fetch supplier profiles ────────────────────────────────────────────────
+  const supplierIds = [
+    ...new Set(
+      bids
+        .map((b) => b.supplier_id)
+        .filter((id): id is string => !!id)
+    ),
+  ];
+
+  const profileMap = new Map<string, ProfileRow>();
+  if (supplierIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("supplier_profiles")
+      .select("id, city, country, average_rating, total_ratings")
+      .in("id", supplierIds);
+    for (const p of profiles ?? []) {
+      profileMap.set(p.id, p as ProfileRow);
+    }
+  }
+
+  // ── Already-rated orders (to show/hide "Rate supplier" link) ───────────────
+  const { data: ratedData } = await supabase
+    .from("supplier_ratings")
+    .select("order_id")
+    .eq("restaurant_id", user.id);
+  const ratedOrderIds = new Set(
+    (ratedData ?? []).map((r: { order_id: string }) => r.order_id)
+  );
+
+  // ── Restaurant's city for locality matching ────────────────────────────────
+  const restaurantCity =
+    (user.user_metadata?.city as string | undefined)?.toLowerCase() ?? null;
+
+  // ── Sort: local bids first (stable — preserves relative order within groups)
+  const sortedBids = [...bids].sort((a, b) => {
+    const aCity = profileMap.get(a.supplier_id ?? "")?.city?.toLowerCase();
+    const bCity = profileMap.get(b.supplier_id ?? "")?.city?.toLowerCase();
+    const aLocal = restaurantCity !== null && aCity === restaurantCity;
+    const bLocal = restaurantCity !== null && bCity === restaurantCity;
+    if (aLocal && !bLocal) return -1;
+    if (!aLocal && bLocal) return 1;
+    return 0;
+  });
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-10">
+
+        {/* Rated success banner */}
+        {rated && (
+          <div className="mb-6 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+            <svg className="h-4 w-4 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            Rating submitted — thank you for your feedback!
+          </div>
+        )}
 
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -98,7 +158,7 @@ export default async function BidsPage({
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               {orderFilter
-                ? `${bids.length} bid${bids.length !== 1 ? "s" : ""} received on this order.`
+                ? `${sortedBids.length} bid${sortedBids.length !== 1 ? "s" : ""} received on this order.`
                 : "Review and respond to supplier bids on your orders."}
             </p>
           </div>
@@ -132,22 +192,66 @@ export default async function BidsPage({
               </Link>
             );
           })}
+
+          {/* Locality hint */}
+          {!restaurantCity && (
+            <Link
+              href="/settings"
+              className="ml-auto shrink-0 text-xs font-medium text-slate-400 hover:text-indigo-600 transition-colors"
+            >
+              Set your city to see LOCAL badges →
+            </Link>
+          )}
         </div>
 
         {/* Bid cards */}
         <div className="space-y-4">
-          {bids.map((bid) => {
+          {sortedBids.map((bid) => {
             const s = statusConfig[bid.status] ?? statusConfig.pending;
-            const orderTitle = (bid.orders as { title: string }[] | null)?.[0]?.title ?? "—";
+            const title = (bid.orders as { title: string }[] | null)?.[0]?.title ?? "—";
+
+            const profile     = profileMap.get(bid.supplier_id ?? "");
+            const isLocal     = restaurantCity !== null
+              && profile?.city?.toLowerCase() === restaurantCity;
+            const alreadyRated = ratedOrderIds.has(bid.order_id);
+            const avgRating   = profile?.average_rating ?? 0;
+            const totalRatings = profile?.total_ratings ?? 0;
+
             return (
               <div key={bid.id} className="card p-6 transition hover:shadow-card-hover">
                 {/* Top row */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-                      {orderTitle}
+                      {title}
                     </p>
-                    <h3 className="truncate text-lg font-bold text-slate-900">{bid.supplier_name}</h3>
+
+                    {/* Supplier name + LOCAL badge + rating */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-bold text-slate-900">{bid.supplier_name}</h3>
+                      {isLocal && (
+                        <span className="badge bg-emerald-100 text-emerald-700">
+                          LOCAL
+                        </span>
+                      )}
+                      {totalRatings > 0 && (
+                        <span className="flex items-center gap-0.5 text-sm">
+                          <svg className="h-4 w-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                          </svg>
+                          <span className="font-semibold text-amber-600">{avgRating.toFixed(1)}</span>
+                          <span className="text-xs text-slate-400 ml-0.5">({totalRatings})</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Location */}
+                    {profile?.city && (
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        📍 {profile.city}{profile.country ? `, ${profile.country}` : ""}
+                      </p>
+                    )}
+
                     <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{bid.notes}</p>
                   </div>
 
@@ -163,7 +267,7 @@ export default async function BidsPage({
                 {bid.status === "pending" && (
                   <div className="mt-5 flex gap-3 border-t border-slate-100 pt-4">
                     <form action={acceptBid}>
-                      <input type="hidden" name="bid_id" value={bid.id} />
+                      <input type="hidden" name="bid_id"   value={bid.id} />
                       <input type="hidden" name="order_id" value={bid.order_id} />
                       <button
                         type="submit"
@@ -184,13 +288,32 @@ export default async function BidsPage({
                 )}
 
                 {bid.status === "won" && (
-                  <div className="mt-5 flex items-center gap-2 border-t border-slate-100 pt-4">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100">
-                      <svg className="h-3.5 w-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
+                  <div className="mt-5 flex items-center gap-3 border-t border-slate-100 pt-4">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100">
+                        <svg className="h-3.5 w-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </div>
+                      <span className="text-sm font-medium text-emerald-700">
+                        Bid accepted — awaiting delivery
+                      </span>
                     </div>
-                    <span className="text-sm font-medium text-emerald-700">Bid accepted — awaiting delivery</span>
+                    {alreadyRated ? (
+                      <span className="ml-auto flex items-center gap-1 text-xs text-slate-400">
+                        <svg className="h-3.5 w-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                        </svg>
+                        Rated
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/bids/rate?supplierId=${bid.supplier_id}&orderId=${bid.order_id}&supplierName=${encodeURIComponent(bid.supplier_name ?? "")}`}
+                        className="ml-auto text-xs font-semibold text-amber-600 underline hover:text-amber-700 transition-colors"
+                      >
+                        Rate supplier
+                      </Link>
+                    )}
                   </div>
                 )}
               </div>
@@ -198,7 +321,7 @@ export default async function BidsPage({
           })}
         </div>
 
-        {bids.length === 0 && (
+        {sortedBids.length === 0 && (
           <div className="card py-20 text-center">
             <p className="text-slate-400">
               {orderFilter ? "No bids received on this order yet." : "No bids received yet."}
@@ -209,7 +332,9 @@ export default async function BidsPage({
                 : "Post an order to start receiving bids from suppliers."}
             </p>
             {!orderFilter && (
-              <Link href="/orders/new" className="btn-primary mx-auto mt-6 inline-flex">Post an order</Link>
+              <Link href="/orders/new" className="btn-primary mx-auto mt-6 inline-flex">
+                Post an order
+              </Link>
             )}
           </div>
         )}
