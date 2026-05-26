@@ -64,14 +64,23 @@ export default async function SupplierDashboardPage() {
     .filter((b) => b.status === "won")
     .map((b) => b.id);
 
-  const deliveryStatusMap = new Map<string, string>();
+  type DeliveryDetail = {
+    bid_id: string;
+    id: string;
+    status: string;
+    delivery_method: string;
+    claimed_at: string | null;
+    picked_up_at: string | null;
+    delivered_at: string | null;
+  };
+  const deliveryDetailMap = new Map<string, DeliveryDetail>();
   if (wonBidIds.length > 0) {
     const { data: deliveries } = await admin
       .from("deliveries")
-      .select("bid_id, status")
+      .select("bid_id, id, status, delivery_method, claimed_at, picked_up_at, delivered_at")
       .in("bid_id", wonBidIds);
-    for (const d of deliveries ?? []) {
-      deliveryStatusMap.set(d.bid_id, d.status);
+    for (const d of (deliveries ?? []) as DeliveryDetail[]) {
+      deliveryDetailMap.set(d.bid_id, d);
     }
   }
 
@@ -91,11 +100,19 @@ export default async function SupplierDashboardPage() {
     .limit(10);
 
   const orders: Order[] = openOrders ?? [];
-  const myBids: SupplierBid[] = (myBidsData ?? []).map((bid) => ({
-    ...bid,
-    orders: bid.orders as { title: string }[] | null,
-    deliveryStatus: deliveryStatusMap.get(bid.id) ?? null,
-  }));
+  const myBids: SupplierBid[] = (myBidsData ?? []).map((bid) => {
+    const detail = deliveryDetailMap.get(bid.id);
+    return {
+      ...bid,
+      orders:         bid.orders as { title: string }[] | null,
+      deliveryStatus: detail?.status ?? null,
+      deliveryId:     detail?.id ?? null,
+      deliveryMethod: detail?.delivery_method ?? null,
+      claimedAt:      detail?.claimed_at ?? null,
+      pickedUpAt:     detail?.picked_up_at ?? null,
+      deliveredAt:    detail?.delivered_at ?? null,
+    };
+  });
   const biddedOrderIds = new Set(myBids.map((b) => b.order_id));
 
   type RatingRow = {

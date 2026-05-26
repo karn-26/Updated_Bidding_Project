@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { acceptBid, rejectBid } from "./actions";
+import { rejectBid } from "./actions";
+import AcceptBidFlow from "@/components/bids/AcceptBidFlow";
 
 const statusConfig: Record<string, { label: string; cls: string }> = {
   pending:  { label: "Pending",  cls: "bg-amber-100 text-amber-700"    },
@@ -28,6 +29,12 @@ type ProfileRow = {
   country: string | null;
   average_rating: number;
   total_ratings: number;
+};
+
+type DeliveryRow = {
+  id: string;
+  status: string;
+  delivery_method: string;
 };
 
 export default async function BidsPage({
@@ -101,7 +108,7 @@ export default async function BidsPage({
     }
   }
 
-  // ── Already-rated orders (to show/hide "Rate supplier" link) ───────────────
+  // ── Already-rated orders ───────────────────────────────────────────────────
   const { data: ratedData } = await supabase
     .from("supplier_ratings")
     .select("order_id")
@@ -110,11 +117,28 @@ export default async function BidsPage({
     (ratedData ?? []).map((r: { order_id: string }) => r.order_id)
   );
 
+  // ── Delivery status for won bids (determines rating link eligibility) ──────
+  const wonOrderIds = bids
+    .filter((b) => b.status === "won")
+    .map((b) => b.order_id)
+    .filter((id): id is string => !!id);
+
+  const deliveryMap = new Map<string, DeliveryRow>();
+  if (wonOrderIds.length > 0) {
+    const { data: deliveries } = await supabase
+      .from("deliveries")
+      .select("id, order_id, status, delivery_method")
+      .in("order_id", wonOrderIds);
+    for (const d of (deliveries ?? []) as (DeliveryRow & { order_id: string })[]) {
+      deliveryMap.set(d.order_id, d);
+    }
+  }
+
   // ── Restaurant's city for locality matching ────────────────────────────────
   const restaurantCity =
     (user.user_metadata?.city as string | undefined)?.toLowerCase() ?? null;
 
-  // ── Sort: local bids first (stable — preserves relative order within groups)
+  // ── Sort: local bids first ─────────────────────────────────────────────────
   const sortedBids = [...bids].sort((a, b) => {
     const aCity = profileMap.get(a.supplier_id ?? "")?.city?.toLowerCase();
     const bCity = profileMap.get(b.supplier_id ?? "")?.city?.toLowerCase();
@@ -210,12 +234,19 @@ export default async function BidsPage({
             const s = statusConfig[bid.status] ?? statusConfig.pending;
             const title = (bid.orders as { title: string }[] | null)?.[0]?.title ?? "—";
 
-            const profile     = profileMap.get(bid.supplier_id ?? "");
-            const isLocal     = restaurantCity !== null
+            const profile      = profileMap.get(bid.supplier_id ?? "");
+            const isLocal      = restaurantCity !== null
               && profile?.city?.toLowerCase() === restaurantCity;
             const alreadyRated = ratedOrderIds.has(bid.order_id);
-            const avgRating   = profile?.average_rating ?? 0;
+            const avgRating    = profile?.average_rating ?? 0;
             const totalRatings = profile?.total_ratings ?? 0;
+
+            // Determine rating link eligibility for won bids
+            const delivery           = deliveryMap.get(bid.order_id ?? "");
+            const isDelivered        = delivery?.status === "delivered";
+            const isSupplierDelivery = delivery?.delivery_method === "supplier";
+            const showSupplierRate   = isDelivered && isSupplierDelivery && !alreadyRated;
+            const showPartnerRate    = isDelivered && !isSupplierDelivery;
 
             return (
               <div key={bid.id} className="card p-6 transition hover:shadow-card-hover">
@@ -230,9 +261,7 @@ export default async function BidsPage({
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg font-bold text-slate-900">{bid.supplier_name}</h3>
                       {isLocal && (
-                        <span className="badge bg-emerald-100 text-emerald-700">
-                          LOCAL
-                        </span>
+                        <span className="badge bg-emerald-100 text-emerald-700">LOCAL</span>
                       )}
                       {totalRatings > 0 && (
                         <span className="flex items-center gap-0.5 text-sm">
@@ -263,19 +292,10 @@ export default async function BidsPage({
                   </div>
                 </div>
 
-                {/* Actions */}
+                {/* Pending actions */}
                 {bid.status === "pending" && (
                   <div className="mt-5 flex gap-3 border-t border-slate-100 pt-4">
-                    <form action={acceptBid}>
-                      <input type="hidden" name="bid_id"   value={bid.id} />
-                      <input type="hidden" name="order_id" value={bid.order_id} />
-                      <button
-                        type="submit"
-                        className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 active:scale-[0.98]"
-                      >
-                        Accept bid
-                      </button>
-                    </form>
+                    <AcceptBidFlow bidId={bid.id} orderId={bid.order_id} />
                     <form action={rejectBid}>
                       <input type="hidden" name="bid_id"      value={bid.id} />
                       <input type="hidden" name="supplier_id" value={bid.supplier_id} />
@@ -287,6 +307,7 @@ export default async function BidsPage({
                   </div>
                 )}
 
+                {/* Won bid status + rating link */}
                 {bid.status === "won" && (
                   <div className="mt-5 flex items-center gap-3 border-t border-slate-100 pt-4">
                     <div className="flex items-center gap-2">
@@ -296,9 +317,10 @@ export default async function BidsPage({
                         </svg>
                       </div>
                       <span className="text-sm font-medium text-emerald-700">
-                        Bid accepted — awaiting delivery
+                        {isSupplierDelivery ? "Bid accepted — supplier delivering" : "Bid accepted — awaiting delivery"}
                       </span>
                     </div>
+
                     {alreadyRated ? (
                       <span className="ml-auto flex items-center gap-1 text-xs text-slate-400">
                         <svg className="h-3.5 w-3.5 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
@@ -306,14 +328,21 @@ export default async function BidsPage({
                         </svg>
                         Rated
                       </span>
-                    ) : (
+                    ) : showSupplierRate ? (
                       <Link
                         href={`/bids/rate?supplierId=${bid.supplier_id}&orderId=${bid.order_id}&supplierName=${encodeURIComponent(bid.supplier_name ?? "")}`}
                         className="ml-auto text-xs font-semibold text-amber-600 underline hover:text-amber-700 transition-colors"
                       >
                         Rate supplier
                       </Link>
-                    )}
+                    ) : showPartnerRate ? (
+                      <Link
+                        href={`/delivery/rate/${delivery!.id}`}
+                        className="ml-auto text-xs font-semibold text-amber-600 underline hover:text-amber-700 transition-colors"
+                      >
+                        Rate delivery partner
+                      </Link>
+                    ) : null}
                   </div>
                 )}
               </div>

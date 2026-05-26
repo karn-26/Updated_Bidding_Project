@@ -31,6 +31,20 @@ export default async function RateBidPage({
 
   if (!bid) redirect("/bids");
 
+  // Guard: only allow rating when the delivery is completed
+  const { data: delivery } = await supabase
+    .from("deliveries")
+    .select("id, status, delivery_method")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  // Rating via this page is only for supplier-delivered orders after delivery
+  if (!delivery || delivery.status !== "delivered") redirect("/bids");
+  if (delivery.delivery_method !== "supplier") {
+    // Partner-delivered orders use /delivery/rate/[deliveryId] instead
+    redirect(`/delivery/rate/${delivery.id}`);
+  }
+
   // Guard: don't show the form if this order was already rated
   const { data: existing } = await supabase
     .from("supplier_ratings")
@@ -52,11 +66,7 @@ export default async function RateBidPage({
 
           {/* Icon */}
           <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
-            <svg
-              className="h-7 w-7 text-amber-500"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="h-7 w-7 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
             </svg>
           </div>

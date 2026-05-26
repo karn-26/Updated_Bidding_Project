@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import DeliveryStageTracker from "@/components/delivery/DeliveryStageTracker";
 
 export type SupplierBid = {
   id: string;
@@ -11,28 +12,26 @@ export type SupplierBid = {
   status: string;
   orders: { title: string }[] | null;
   deliveryStatus?: string | null;
+  deliveryId?: string | null;
+  deliveryMethod?: string | null;
+  claimedAt?: string | null;
+  pickedUpAt?: string | null;
+  deliveredAt?: string | null;
 };
 
 const statusConfig: Record<string, { label: string; badgeCls: string; cardCls: string }> = {
-  pending:  { label: "Pending",  badgeCls: "bg-amber-100 text-amber-700",   cardCls: "border-slate-200"              },
+  pending:  { label: "Pending",  badgeCls: "bg-amber-100 text-amber-700",     cardCls: "border-slate-200"                },
   won:      { label: "Accepted", badgeCls: "bg-emerald-100 text-emerald-800", cardCls: "border-emerald-300 bg-emerald-50" },
-  rejected: { label: "Rejected", badgeCls: "bg-red-100 text-red-700",        cardCls: "border-red-300 bg-red-50"      },
-};
-
-const deliveryStatusLabel: Record<string, string> = {
-  pending:   "Awaiting delivery partner",
-  claimed:   "Delivery claimed — en route",
-  picked_up: "Picked up — on the way",
-  delivered: "Delivered ✓",
+  rejected: { label: "Rejected", badgeCls: "bg-red-100 text-red-700",         cardCls: "border-red-300 bg-red-50"        },
 };
 
 type TabKey = "all" | "pending" | "won" | "rejected";
 
 const TABS: { key: TabKey; label: string; activeCls: string }[] = [
-  { key: "all",      label: "All",      activeCls: "bg-indigo-600 text-white"   },
-  { key: "pending",  label: "Pending",  activeCls: "bg-amber-500 text-white"    },
-  { key: "won",      label: "Won",      activeCls: "bg-emerald-600 text-white"  },
-  { key: "rejected", label: "Rejected", activeCls: "bg-red-500 text-white"      },
+  { key: "all",      label: "All",      activeCls: "bg-indigo-600 text-white"  },
+  { key: "pending",  label: "Pending",  activeCls: "bg-amber-500 text-white"   },
+  { key: "won",      label: "Won",      activeCls: "bg-emerald-600 text-white" },
+  { key: "rejected", label: "Rejected", activeCls: "bg-red-500 text-white"     },
 ];
 
 export default function MyBidsPanel({
@@ -77,19 +76,6 @@ export default function MyBidsPanel({
           setBids((prev) =>
             prev.map((bid) =>
               bid.id === updated.id ? { ...bid, status: updated.status, price: updated.price } : bid
-            )
-          );
-        }
-      )
-      // Listen for delivery status changes on won bids
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "deliveries", filter: `supplier_id=eq.${userId}` },
-        (payload) => {
-          const updated = payload.new as { bid_id: string; status: string };
-          setBids((prev) =>
-            prev.map((bid) =>
-              bid.id === updated.bid_id ? { ...bid, deliveryStatus: updated.status } : bid
             )
           );
         }
@@ -145,10 +131,17 @@ export default function MyBidsPanel({
           const isWon      = bid.status === "won";
           const isRejected = bid.status === "rejected";
           const isPending  = bid.status === "pending";
-          const isClickable = isWon || isRejected || isPending;
 
-          const cardContent = (
-            <>
+          const isSupplierDelivery = bid.deliveryMethod === "supplier";
+          // Supplier sees update controls only when they are the deliverer
+          const canUpdate = isWon && isSupplierDelivery && !!bid.deliveryId;
+
+          const deliveredByLabel = isSupplierDelivery
+            ? "You are delivering this order"
+            : "A delivery partner is handling this";
+
+          return (
+            <div key={bid.id} className={`card border p-4 ${s.cardCls}`}>
               <p className="mb-2 text-sm font-semibold leading-snug text-slate-800">{orderTitle}</p>
 
               <div className="flex items-center justify-between gap-2">
@@ -157,9 +150,13 @@ export default function MyBidsPanel({
                 </p>
                 <div className="flex items-center gap-1.5">
                   <span className={`badge ${s.badgeCls}`}>{s.label}</span>
-                  <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
+                  {(isPending || isRejected) && (
+                    <Link href={`/supplier/bids/${bid.id}`}>
+                      <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                      </svg>
+                    </Link>
+                  )}
                 </div>
               </div>
 
@@ -171,21 +168,34 @@ export default function MyBidsPanel({
                   Tap to view or edit this bid
                 </p>
               )}
+
               {isWon && (
                 <>
-                  <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                  <p className="mt-2 mb-3 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                     </svg>
                     Your bid was accepted
                   </p>
-                  {bid.deliveryStatus && (
-                    <p className={`mt-1 text-xs font-medium ${bid.deliveryStatus === "delivered" ? "text-emerald-600" : "text-slate-500"}`}>
-                      🚚 {deliveryStatusLabel[bid.deliveryStatus] ?? bid.deliveryStatus}
-                    </p>
+
+                  {bid.deliveryId ? (
+                    <div className="rounded-xl border border-slate-100 bg-white p-3">
+                      <DeliveryStageTracker
+                        deliveryId={bid.deliveryId}
+                        initialStatus={bid.deliveryStatus ?? "pending"}
+                        initialClaimedAt={bid.claimedAt}
+                        initialPickedUpAt={bid.pickedUpAt}
+                        initialDeliveredAt={bid.deliveredAt}
+                        deliveredByLabel={deliveredByLabel}
+                        canUpdate={canUpdate}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400">Delivery record pending…</p>
                   )}
                 </>
               )}
+
               {isRejected && (
                 <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-red-500">
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -194,20 +204,6 @@ export default function MyBidsPanel({
                   This bid was not selected
                 </p>
               )}
-            </>
-          );
-
-          return isClickable ? (
-            <Link
-              key={bid.id}
-              href={`/supplier/bids/${bid.id}`}
-              className={`card block border p-4 transition-all hover:shadow-md ${s.cardCls}`}
-            >
-              {cardContent}
-            </Link>
-          ) : (
-            <div key={bid.id} className={`card border p-4 ${s.cardCls}`}>
-              {cardContent}
             </div>
           );
         })

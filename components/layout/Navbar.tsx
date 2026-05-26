@@ -41,7 +41,6 @@ export default function Navbar({ user, initialNotifications }: NavbarProps) {
                 <NavLink href="/orders/new">Place Order</NavLink>
                 <NavLink href="/presets">Presets</NavLink>
                 <NavLink href="/bids">My Bids</NavLink>
-                <NavLink href="/supplier/directory">Suppliers</NavLink>
                 <NavLink href="/settings">Settings</NavLink>
               </>
             ) : role === "supplier" ? (

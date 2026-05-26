@@ -44,7 +44,7 @@ export default async function DeliveryDashboardPage() {
     .eq("status", "delivered")
     .gte("delivered_at", startOfMonth.toISOString());
 
-  // All pending unclaimed deliveries for the live feed
+  // All pending unclaimed deliveries for the live feed — supplier-handled excluded
   const { data: pendingDeliveriesData } = await supabase
     .from("deliveries")
     .select(`
@@ -52,6 +52,7 @@ export default async function DeliveryDashboardPage() {
       orders ( id, title, order_items ( name, quantity, unit ) )
     `)
     .eq("status", "pending")
+    .eq("delivery_method", "delivery_partner")
     .is("delivery_partner_id", null)
     .order("created_at", { ascending: false });
 

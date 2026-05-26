@@ -82,6 +82,7 @@ export interface Delivery {
   supplier_id: string;
   pickup_address: string | null;
   dropoff_address: string | null;
+  delivery_method: "supplier" | "delivery_partner";
   status: "pending" | "claimed" | "picked_up" | "delivered";
   claimed_at: string | null;
   picked_up_at: string | null;

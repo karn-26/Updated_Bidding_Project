@@ -6,10 +6,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 export async function acceptBid(formData: FormData) {
-  const bidId   = formData.get("bid_id")   as string | null;
-  const orderId = formData.get("order_id") as string | null;
+  const bidId          = formData.get("bid_id")          as string | null;
+  const orderId        = formData.get("order_id")        as string | null;
+  const deliveryMethod = (formData.get("delivery_method") as string | null) ?? "delivery_partner";
 
-  console.log("[acceptBid] called with bidId:", bidId, "orderId:", orderId);
+  console.log("[acceptBid] called with bidId:", bidId, "orderId:", orderId, "deliveryMethod:", deliveryMethod);
 
   if (!bidId || !orderId) {
     console.error("[acceptBid] Missing bidId or orderId — aborting.");
@@ -59,7 +60,7 @@ export async function acceptBid(formData: FormData) {
 
   if (rejectError) console.error("[acceptBid] Failed to reject other bids:", rejectError);
 
-  // 3. Move order to 'in_delivery' (was 'closed')
+  // 3. Move order to 'in_delivery'
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .update({ status: "in_delivery" })
@@ -82,12 +83,13 @@ export async function acceptBid(formData: FormData) {
 
   const orderTitle   = orderRow?.title        ?? "your order";
   const restaurantId = orderRow?.restaurant_id ?? user.id;
+  const supplierId   = winningBid?.supplier_id ?? "";
 
   // 5. Fetch supplier's city for pickup_address placeholder
   const { data: supplierProfile } = await admin
     .from("supplier_profiles")
     .select("city, country")
-    .eq("id", winningBid?.supplier_id ?? "")
+    .eq("id", supplierId)
     .maybeSingle();
 
   // 6. Fetch restaurant owner's city for dropoff_address placeholder
@@ -95,19 +97,36 @@ export async function acceptBid(formData: FormData) {
   const restaurantCity =
     restaurantUser?.user?.user_metadata?.city as string | undefined;
 
-  // 7. Create delivery record (admin bypasses RLS)
+  const pickupAddress  = supplierProfile?.city
+    ? `${supplierProfile.city}${supplierProfile.country ? `, ${supplierProfile.country}` : ""}`
+    : null;
+  const dropoffAddress = restaurantCity ?? null;
+
+  const isSupplierDelivery = deliveryMethod === "supplier";
+
+  // 7. Create delivery record
+  //    For supplier delivery: delivery_partner_id = supplier_id, status = 'claimed'
+  //    This lets the supplier call updateDeliveryStatus() using the same action.
   const { data: delivery, error: deliveryError } = await admin
     .from("deliveries")
     .insert({
-      order_id:        orderId,
-      bid_id:          bidId,
-      restaurant_id:   restaurantId,
-      supplier_id:     winningBid?.supplier_id ?? "",
-      pickup_address:  supplierProfile?.city
-        ? `${supplierProfile.city}${supplierProfile.country ? `, ${supplierProfile.country}` : ""}`
-        : null,
-      dropoff_address: restaurantCity ?? null,
-      status:          "pending",
+      order_id:            orderId,
+      bid_id:              bidId,
+      restaurant_id:       restaurantId,
+      supplier_id:         supplierId,
+      delivery_method:     deliveryMethod,
+      pickup_address:      pickupAddress,
+      dropoff_address:     dropoffAddress,
+      ...(isSupplierDelivery
+        ? {
+            delivery_partner_id: supplierId,
+            status:              "claimed",
+            claimed_at:          new Date().toISOString(),
+          }
+        : {
+            delivery_partner_id: null,
+            status:              "pending",
+          }),
     })
     .select("id")
     .single();
@@ -116,15 +135,19 @@ export async function acceptBid(formData: FormData) {
     console.error("[acceptBid] Failed to create delivery record:", deliveryError);
   }
 
-  // 8. Send notifications via admin client
+  // 8. Notifications
   // 8a. Winning supplier
-  if (winningBid?.supplier_id) {
+  if (supplierId) {
+    const supplierMessage = isSupplierDelivery
+      ? `Congratulations! Your bid on "${orderTitle}" was accepted. You are responsible for delivering this order — please update the delivery stages from your dashboard.`
+      : `Congratulations! Your bid on "${orderTitle}" was accepted. A delivery partner will be assigned shortly.`;
+
     await admin.from("notifications").insert({
-      user_id: winningBid.supplier_id,
+      user_id: supplierId,
       title:   "Your Bid Was Accepted",
-      message: `Congratulations! Your bid on "${orderTitle}" was accepted. A delivery partner will be assigned shortly.`,
+      message: supplierMessage,
       is_read: false,
-      link:    `/supplier/bids/${winningBid.id}`,
+      link:    `/supplier/dashboard`,
     });
   }
 
@@ -135,14 +158,13 @@ export async function acceptBid(formData: FormData) {
       title:   "Your Bid Was Not Selected",
       message: `The restaurant chose a different supplier for "${orderTitle}".`,
       is_read: false,
-      link:    `/supplier/bids/${b.id}`,
+      link:    `/supplier/dashboard`,
     }));
     await admin.from("notifications").insert(rejectedNotifications);
   }
 
-  // 8c. Fan-out to all delivery partners (fire-and-forget via API route)
-  //     We don't await so this doesn't slow down the redirect.
-  if (delivery?.id) {
+  // 8c. Fan-out to delivery partners only when using the delivery partner method
+  if (!isSupplierDelivery && delivery?.id) {
     fetch(
       `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/notify-new-delivery`,
       {
@@ -155,12 +177,10 @@ export async function acceptBid(formData: FormData) {
 
   revalidatePath("/bids");
   revalidatePath("/dashboard");
+  revalidatePath("/orders");
 
-  // Redirect to supplier rating page
-  const supplierName = encodeURIComponent(winningBid?.supplier_name ?? "");
-  redirect(
-    `/bids/rate?supplierId=${winningBid?.supplier_id}&orderId=${orderId}&supplierName=${supplierName}`
-  );
+  // Redirect back to bids — rating happens only after delivery is completed
+  redirect("/bids");
 }
 
 export async function rejectBid(formData: FormData) {
@@ -189,7 +209,7 @@ export async function rejectBid(formData: FormData) {
       title:   "Your Bid Was Rejected",
       message: `Your bid on "${orderTitle}" was not selected by the restaurant.`,
       is_read: false,
-      link:    `/supplier/bids/${bidId}`,
+      link:    `/supplier/dashboard`,
     });
   }
 

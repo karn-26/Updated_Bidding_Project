@@ -42,6 +42,7 @@ export default function LiveDeliveriesFeed({
           const row = payload.new as {
             id: string;
             status: string;
+            delivery_method: string;
             pickup_address: string | null;
             dropoff_address: string | null;
             created_at: string;
@@ -49,8 +50,9 @@ export default function LiveDeliveriesFeed({
             delivery_partner_id: string | null;
           };
 
-          // Only surface pending unclaimed deliveries
+          // Only surface pending unclaimed delivery_partner deliveries
           if (row.status !== "pending" || row.delivery_partner_id !== null) return;
+          if (row.delivery_method !== "delivery_partner") return;
 
           // Fetch the related order to get title and items
           const { data: order } = await supabase
