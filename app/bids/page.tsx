@@ -213,7 +213,9 @@ export default async function BidsPage({
         <div className="space-y-4">
           {sortedBids.map((bid) => {
             const s = statusConfig[bid.status] ?? statusConfig.pending;
-            const title = (bid.orders as { title: string }[] | null)?.[0]?.title ?? "—";
+            const title = Array.isArray(bid.orders)
+              ? (bid.orders as { title: string }[])[0]?.title ?? "—"
+              : (bid.orders as { title: string } | null)?.title ?? "—";
 
             const profile      = profileMap.get(bid.supplier_id ?? "");
             const isLocal      = restaurantPref && profile?.prefecture === restaurantPref;

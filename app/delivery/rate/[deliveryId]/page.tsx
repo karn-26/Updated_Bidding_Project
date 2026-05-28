@@ -17,19 +17,28 @@ export default async function RateDeliveryPage({
 
   if (!user) redirect("/auth/login");
 
-  // Fetch the delivery — must belong to this restaurant or supplier
+  // This page is for SUPPLIERS rating their DELIVERY PARTNER.
+  // Restaurant owners rate the supplier via /bids/rate instead.
+  if (user.user_metadata?.role !== "supplier") redirect("/dashboard");
+
+  // Fetch the delivery — supplier must own this delivery
   const { data: delivery } = await supabase
     .from("deliveries")
     .select(`
-      id, status, delivery_partner_id,
+      id, status, delivery_method, delivery_partner_id,
       delivery_partners ( business_name, average_rating, total_ratings ),
       orders ( title )
     `)
     .eq("id", deliveryId)
-    .or(`restaurant_id.eq.${user.id},supplier_id.eq.${user.id}`)
+    .eq("supplier_id", user.id)
     .single();
 
   if (!delivery || delivery.status !== "delivered") notFound();
+
+  // Guard: only partner deliveries have a partner to rate
+  if ((delivery.delivery_method as string) !== "delivery_partner") {
+    redirect("/supplier/dashboard");
+  }
 
   // Check if already rated
   const { data: existingRating } = await supabase

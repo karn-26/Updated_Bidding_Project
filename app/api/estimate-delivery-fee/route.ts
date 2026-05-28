@@ -33,7 +33,7 @@ import { haversineKm } from "@/lib/jp_postal";
 
 // ─── Configuration constant ──────────────────────────────────────────────────
 // Base rate in JPY per kilometre.  Change here to tune across the whole app.
-const DELIVERY_RATE_PER_KM = 60; // ¥60 / km
+const DELIVERY_RATE_PER_KM = 200; // ¥200 / km
 // ─────────────────────────────────────────────────────────────────────────────
 
 const client = new Anthropic();
@@ -89,14 +89,16 @@ ${itemsList}
 Straight-line distance between supplier and restaurant: ${distanceKm.toFixed(1)} km
 Base delivery cost at ¥${DELIVERY_RATE_PER_KM}/km: ¥${Math.round(baseRate)}
 
+ALL FEES ARE IN JAPANESE YEN (JPY, ¥). Return a WHOLE NUMBER integer — NO decimals.
 Adjust the fee based on:
 - Goods volume and handling difficulty (e.g. many items, heavy/fragile goods = higher fee)
 - Typical road distance multiplier for Japan (road distance ≈ 1.3× straight-line)
 - Minimum viable fee of ¥500 even for very short distances
 - Round to the nearest ¥100
+- Example: 8 km straight-line with moderate goods → road distance ≈ 10.4 km → base ¥${DELIVERY_RATE_PER_KM * 10} → estimatedFee 2100
 
 Respond ONLY with valid JSON in this exact format — no markdown, no code fences, no extra text:
-{"estimatedFee": 1200, "reasoning": "2–3 sentence explanation mentioning the distance and key cost drivers."}`;
+{"estimatedFee": 2100, "reasoning": "2–3 sentence explanation in yen, mentioning the distance and key cost drivers."}`;
 
   try {
     const message = await client.messages.create({
@@ -127,7 +129,8 @@ Respond ONLY with valid JSON in this exact format — no markdown, no code fence
       );
     }
 
-    return NextResponse.json({ ...(result as object), distanceKm: parseFloat(distanceKm.toFixed(1)) });
+    const r = result as { estimatedFee: number; reasoning: string };
+    return NextResponse.json({ estimatedFee: Math.round(r.estimatedFee), reasoning: r.reasoning, distanceKm: parseFloat(distanceKm.toFixed(1)) });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
       return NextResponse.json(

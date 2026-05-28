@@ -212,13 +212,13 @@ export default function NewBidPage() {
 
     const finalFee = deliveryType === "partner"
       ? (feeEstimate?.estimatedFee ?? 0)
-      : parseFloat(deliveryFee) || 0;
+      : Math.round(parseFloat(deliveryFee) || 0);
 
     const { error } = await supabase.from("bids").insert({
       order_id:               orderId,
       supplier_id:            user.id,
       supplier_name:          supplierName,
-      price:                  parseFloat(price),
+      price:                  Math.round(parseFloat(price)),
       delivery_date:          deliveryDate,
       notes:                  notes.trim() || null,
       status:                 "pending",
@@ -533,8 +533,8 @@ export default function NewBidPage() {
               <input
                 id="bid-price"
                 type="number"
-                min="0.01"
-                step="0.01"
+                min="1"
+                step="1"
                 required
                 placeholder="e.g. 32000"
                 value={price}

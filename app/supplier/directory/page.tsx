@@ -5,37 +5,36 @@ import Link from "next/link";
 type SupplierRow = {
   id: string;
   business_name: string | null;
-  city: string | null;
-  country: string | null;
+  prefecture:    string | null;
+  city_ward:     string | null;
   average_rating: number;
-  total_ratings: number;
+  total_ratings:  number;
 };
 
 export default async function SupplierDirectoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ city?: string; sort?: string }>;
+  searchParams: Promise<{ prefecture?: string; sort?: string }>;
 }) {
-  const { city: cityFilter, sort } = await searchParams;
+  const { prefecture: prefFilter, sort } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/auth/login");
   if (user.user_metadata?.role === "supplier") redirect("/supplier/dashboard");
 
-  const restaurantCity =
-    (user.user_metadata?.city as string | undefined)?.toLowerCase() ?? null;
+  const restaurantPref =
+    (user.user_metadata?.prefecture as string | undefined) ?? null;
 
   let query = supabase
     .from("supplier_profiles")
-    .select("id, business_name, city, country, average_rating, total_ratings")
+    .select("id, business_name, prefecture, city_ward, average_rating, total_ratings")
     .not("business_name", "is", null);
 
-  if (cityFilter) {
-    query = (query as typeof query).ilike("city", `%${cityFilter}%`);
+  if (prefFilter) {
+    query = (query as typeof query).ilike("prefecture", `%${prefFilter}%`);
   }
 
-  // Fetch ordered by rating by default; re-sort for locality in JS
   const { data: rawSuppliers } = await query.order("average_rating", {
     ascending: false,
   });
@@ -43,10 +42,10 @@ export default async function SupplierDirectoryPage({
   const suppliers: SupplierRow[] = rawSuppliers ?? [];
 
   const sortedSuppliers =
-    sort === "local" && restaurantCity
+    sort === "local" && restaurantPref
       ? [...suppliers].sort((a, b) => {
-          const aLocal = a.city?.toLowerCase() === restaurantCity;
-          const bLocal = b.city?.toLowerCase() === restaurantCity;
+          const aLocal = a.prefecture === restaurantPref;
+          const bLocal = b.prefecture === restaurantPref;
           if (aLocal && !bLocal) return -1;
           if (!aLocal && bLocal) return 1;
           return 0;
@@ -55,8 +54,8 @@ export default async function SupplierDirectoryPage({
 
   const buildHref = (params: Record<string, string>) => {
     const p = new URLSearchParams();
-    if (cityFilter && !("city" in params)) p.set("city", cityFilter);
-    if (sort      && !("sort" in params)) p.set("sort", sort);
+    if (prefFilter && !("prefecture" in params)) p.set("prefecture", prefFilter);
+    if (sort       && !("sort"       in params)) p.set("sort",       sort);
     Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); });
     return `/supplier/directory${p.size > 0 ? `?${p}` : ""}`;
   };
@@ -69,33 +68,31 @@ export default async function SupplierDirectoryPage({
         <div className="mb-8">
           <h1 className="text-2xl font-extrabold text-slate-900">Supplier Directory</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Browse verified suppliers, their locations, and ratings.
+            Browse verified suppliers by location and rating.
           </p>
         </div>
 
         {/* Filters */}
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          {/* City search */}
           <form method="GET" action="/supplier/directory" className="flex gap-2">
             {sort && <input type="hidden" name="sort" value={sort} />}
             <input
-              name="city"
+              name="prefecture"
               type="text"
-              defaultValue={cityFilter ?? ""}
-              placeholder="Filter by city…"
-              className="input w-44"
+              defaultValue={prefFilter ?? ""}
+              placeholder="Filter by prefecture…"
+              className="input w-48"
             />
             <button type="submit" className="btn-secondary py-2 px-3 text-sm">
               Search
             </button>
-            {cityFilter && (
-              <Link href={buildHref({ city: "" })} className="btn-secondary py-2 px-3 text-sm">
+            {prefFilter && (
+              <Link href={buildHref({ prefecture: "" })} className="btn-secondary py-2 px-3 text-sm">
                 Clear
               </Link>
             )}
           </form>
 
-          {/* Sort */}
           <div className="flex gap-2 ml-auto">
             <Link
               href={buildHref({ sort: "" })}
@@ -115,7 +112,7 @@ export default async function SupplierDirectoryPage({
                   : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
-              Local first
+              Same prefecture
             </Link>
           </div>
         </div>
@@ -124,17 +121,15 @@ export default async function SupplierDirectoryPage({
         {sortedSuppliers.length === 0 ? (
           <div className="card py-20 text-center">
             <p className="text-slate-400">
-              {cityFilter
-                ? `No suppliers found in "${cityFilter}".`
+              {prefFilter
+                ? `No suppliers found in "${prefFilter}".`
                 : "No suppliers have set up their profile yet."}
             </p>
           </div>
         ) : (
           <div className="space-y-4">
             {sortedSuppliers.map((supplier) => {
-              const isLocal =
-                restaurantCity !== null &&
-                supplier.city?.toLowerCase() === restaurantCity;
+              const isLocal = restaurantPref !== null && supplier.prefecture === restaurantPref;
 
               return (
                 <div
@@ -142,28 +137,19 @@ export default async function SupplierDirectoryPage({
                   className="card flex items-center justify-between gap-4 p-6 transition hover:shadow-card-hover"
                 >
                   <div className="min-w-0">
-                    {/* Name + LOCAL badge */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-bold text-slate-900">
-                        {supplier.business_name}
-                      </h3>
+                      <h3 className="font-bold text-slate-900">{supplier.business_name}</h3>
                       {isLocal && (
-                        <span className="badge bg-emerald-100 text-emerald-700">
-                          LOCAL
-                        </span>
+                        <span className="badge bg-emerald-100 text-emerald-700">LOCAL</span>
                       )}
                     </div>
-
-                    {/* Location */}
-                    {supplier.city && (
+                    {supplier.prefecture && (
                       <p className="mt-0.5 text-xs text-slate-400">
-                        📍 {supplier.city}
-                        {supplier.country ? `, ${supplier.country}` : ""}
+                        📍 {supplier.prefecture}{supplier.city_ward ? ` ${supplier.city_ward}` : ""}
                       </p>
                     )}
                   </div>
 
-                  {/* Rating */}
                   <div className="shrink-0 text-right">
                     {supplier.total_ratings > 0 ? (
                       <>
@@ -189,12 +175,12 @@ export default async function SupplierDirectoryPage({
           </div>
         )}
 
-        {!restaurantCity && (
+        {!restaurantPref && (
           <p className="mt-6 text-center text-xs text-slate-400">
             <Link href="/settings" className="text-indigo-600 hover:underline">
-              Set your city in Settings
+              Set your address in Settings
             </Link>{" "}
-            to see which suppliers are LOCAL.
+            to see which suppliers are in your prefecture.
           </p>
         )}
       </div>

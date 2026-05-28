@@ -145,9 +145,14 @@ export default async function DeliveryDashboardPage() {
                 : "You are currently unavailable — update in settings."}
             </p>
           </div>
-          <Link href="/delivery/settings" className="btn-secondary self-start sm:self-auto">
-            Settings
-          </Link>
+          <div className="flex gap-2 self-start sm:self-auto">
+            <Link href="/delivery/history" className="btn-secondary">
+              History
+            </Link>
+            <Link href="/delivery/settings" className="btn-secondary">
+              Settings
+            </Link>
+          </div>
         </div>
 
         {/* Stat cards */}

@@ -11,7 +11,7 @@ export default async function DeliverySettingsPage() {
 
   const { data: profile } = await supabase
     .from("delivery_partners")
-    .select("business_name, city, country, phone, vehicle_type, is_available")
+    .select("business_name, postal_code, prefecture, city_ward, block_banchi, phone, vehicle_type, is_available")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -27,11 +27,13 @@ export default async function DeliverySettingsPage() {
         <DeliverySettingsForm
           initialValues={{
             business_name: profile?.business_name ?? "",
-            city:          profile?.city          ?? "",
-            country:       profile?.country        ?? "",
-            phone:         profile?.phone          ?? "",
-            vehicle_type:  (profile?.vehicle_type  ?? "") as "bike" | "car" | "van" | "truck" | "",
-            is_available:  profile?.is_available   ?? true,
+            postal_code:   profile?.postal_code   ?? "",
+            prefecture:    profile?.prefecture    ?? "",
+            city_ward:     profile?.city_ward     ?? "",
+            block_banchi:  profile?.block_banchi  ?? "",
+            phone:         profile?.phone         ?? "",
+            vehicle_type:  (profile?.vehicle_type ?? "") as "bike" | "car" | "van" | "truck" | "",
+            is_available:  profile?.is_available  ?? true,
           }}
         />
       </div>

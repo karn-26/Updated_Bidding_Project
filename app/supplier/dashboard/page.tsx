@@ -105,7 +105,11 @@ export default async function SupplierDashboardPage() {
     const detail = deliveryDetailMap.get(bid.id);
     return {
       ...bid,
-      orders:                 bid.orders as { title: string }[] | null,
+      orders: bid.orders === null
+        ? null
+        : Array.isArray(bid.orders)
+        ? bid.orders as { title: string }[]
+        : [bid.orders as { title: string }],
       delivery_type:          (bid.delivery_type  as "supplier" | "partner") ?? "supplier",
       delivery_fee:           (bid.delivery_fee   as number)  ?? 0,
       delivery_fee_estimated: (bid.delivery_fee_estimated as boolean) ?? false,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import JapaneseAddressInput from "@/components/forms/JapaneseAddressInput";
 import { updateDeliveryPartnerProfile } from "@/app/delivery/actions";
 
 const VEHICLE_TYPES = [
@@ -15,16 +16,25 @@ export default function DeliverySettingsForm({
 }: {
   initialValues: {
     business_name: string;
-    city:          string;
-    country:       string;
+    postal_code:   string;
+    prefecture:    string;
+    city_ward:     string;
+    block_banchi:  string;
     phone:         string;
     vehicle_type:  "bike" | "car" | "van" | "truck" | "";
     is_available:  boolean;
   };
 }) {
   const [values, setValues] = useState(initialValues);
-  const [saved, setSaved]   = useState(false);
-  const [error, setError]   = useState<string | null>(null);
+  const [saved,  setSaved]  = useState(false);
+  const [error,  setError]  = useState<string | null>(null);
+
+  const hasAllAddressFields =
+    !!(initialValues.postal_code && initialValues.prefecture &&
+       initialValues.city_ward   && initialValues.block_banchi);
+  const [addressValid, setAddressValid] = useState(hasAllAddressFields);
+  const [submitted,   setSubmitted]     = useState(false);
+
   const [isPending, startTransition] = useTransition();
 
   const set = (field: keyof typeof values, val: string | boolean) =>
@@ -32,11 +42,12 @@ export default function DeliverySettingsForm({
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setSubmitted(true);
+    if (!addressValid) return;
     setSaved(false);
     setError(null);
 
     const fd = new FormData(e.currentTarget);
-    // Manually set is_available since checkbox value handling is tricky
     fd.set("is_available", values.is_available ? "true" : "false");
 
     startTransition(async () => {
@@ -71,31 +82,20 @@ export default function DeliverySettingsForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="label" htmlFor="city">City</label>
-          <input
-            id="city"
-            name="city"
-            type="text"
-            value={values.city}
-            onChange={(e) => set("city", e.target.value)}
-            placeholder="e.g. Tokyo"
-            className="input"
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="country">Country</label>
-          <input
-            id="country"
-            name="country"
-            type="text"
-            value={values.country}
-            onChange={(e) => set("country", e.target.value)}
-            placeholder="e.g. Japan"
-            className="input"
-          />
-        </div>
+      {/* Japanese address — replaces old City / Country inputs */}
+      <div>
+        <p className="label">Business address</p>
+        <p className="mb-3 text-xs text-slate-400">
+          Used to calculate proximity to nearby delivery jobs.
+        </p>
+        <JapaneseAddressInput
+          onValidChange={setAddressValid}
+          showErrors={submitted}
+          initialPostalCode={values.postal_code}
+          initialPrefecture={values.prefecture}
+          initialCityWard={values.city_ward}
+          initialBlockBanchi={values.block_banchi}
+        />
       </div>
 
       <div>

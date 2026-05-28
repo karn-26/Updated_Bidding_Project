@@ -39,21 +39,23 @@ export async function POST(request: Request) {
     .map((i) => `- ${i.name}: ${i.quantity} ${i.unit}`)
     .join("\n");
 
-  const prompt = `You are a pricing expert for a food and hospitality supply marketplace. A restaurant has posted the following procurement order:
+  const prompt = `You are a pricing expert for a food and hospitality supply marketplace in Japan. A restaurant has posted the following procurement order:
 
 Order title: "${order.title}"
 Bid deadline: ${order.deadline}
 Items requested:
 ${itemsList}
 
-Based on realistic wholesale market prices for these items, suggest an optimal bid price in USD that is competitive but still profitable for a supplier. Consider:
-- Current wholesale market rates for each ingredient or product
-- The quantities involved (bulk discounts where applicable)
-- A reasonable supplier margin of 15–25%
-- Competitiveness relative to other potential bids
+ALL PRICES ARE IN JAPANESE YEN (JPY, ¥). This is a Japan-only marketplace — do NOT use USD or any other currency.
+Rules:
+- Return a WHOLE NUMBER integer yen amount. NO decimals, NO cents.
+- Use realistic Japanese wholesale market rates (e.g. vegetables ¥200–¥600/kg, seafood ¥1,000–¥6,000/kg, meat ¥800–¥3,000/kg, dry goods ¥300–¥1,500/kg).
+- Factor in the quantities requested (bulk discounts for large volumes).
+- Include a supplier margin of 15–25%.
+- Example: 20 kg of salmon at ¥2,000/kg wholesale + 20% margin = suggestedPrice of 48000.
 
 Respond ONLY with valid JSON in this exact format — no markdown, no code fences, no extra text:
-{"suggestedPrice": 350, "reasoning": "2–3 sentence explanation of the pricing logic, mentioning key cost drivers."}`;
+{"suggestedPrice": 48000, "reasoning": "2–3 sentence explanation of the pricing logic in yen, mentioning key cost drivers."}`;
 
   try {
     const message = await client.messages.create({
@@ -86,7 +88,8 @@ Respond ONLY with valid JSON in this exact format — no markdown, no code fence
       );
     }
 
-    return NextResponse.json(result);
+    const r = result as { suggestedPrice: number; reasoning: string };
+    return NextResponse.json({ suggestedPrice: Math.round(r.suggestedPrice), reasoning: r.reasoning });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
       return NextResponse.json(

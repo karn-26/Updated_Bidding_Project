@@ -155,6 +155,31 @@ export async function updateDeliveryStatus(
     // CHANGE 6: All rating links go to the supplier rating page regardless of delivery_type
     const ratingLink = `/bids/rate?supplierId=${delivery.supplier_id}&orderId=${delivery.order_id}&supplierName=${encodeURIComponent(delivererName)}`;
 
+    const partnerRatingLink = `/delivery/rate/${deliveryId}`;
+
+    const supplierNotifications: object[] = [
+      {
+        user_id: delivery.supplier_id,
+        title:   "Delivery Completed",
+        message: isSupplierDelivery
+          ? `You have marked "${orderTitle}" as delivered.`
+          : `"${orderTitle}" was successfully delivered by ${delivererName}.`,
+        is_read: false,
+        link:    `/supplier/dashboard`,
+      },
+    ];
+
+    // When a delivery partner handled this, prompt the supplier to rate them
+    if (!isSupplierDelivery) {
+      supplierNotifications.push({
+        user_id: delivery.supplier_id,
+        title:   "Rate Your Delivery Partner",
+        message: `How was ${delivererName}? Leave a rating for the delivery on "${orderTitle}".`,
+        is_read: false,
+        link:    partnerRatingLink,
+      });
+    }
+
     await admin.from("notifications").insert([
       {
         user_id: delivery.restaurant_id,
@@ -163,15 +188,7 @@ export async function updateDeliveryStatus(
         is_read: false,
         link:    ratingLink,
       },
-      {
-        user_id: delivery.supplier_id,
-        title:   "Delivery Completed",
-        message: isSupplierDelivery
-          ? `You have marked "${orderTitle}" as delivered.`
-          : `"${orderTitle}" has been successfully delivered by ${delivererName}.`,
-        is_read: false,
-        link:    `/supplier/dashboard`,
-      },
+      ...supplierNotifications,
     ]);
   } else {
     // picked_up
