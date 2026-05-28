@@ -1,19 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import DeliveryStageTracker from "@/components/delivery/DeliveryStageTracker";
+import { selfDeliverFallback, cancelDeliveryFallback } from "@/app/delivery/actions";
 
 export type SupplierBid = {
   id: string;
   order_id: string;
   price: number;
+  delivery_type?: "supplier" | "partner" | null;
+  delivery_fee?: number | null;
+  delivery_fee_estimated?: boolean | null;
   status: string;
   orders: { title: string }[] | null;
   deliveryStatus?: string | null;
   deliveryId?: string | null;
   deliveryMethod?: string | null;
+  partnerDeadline?: string | null;
   claimedAt?: string | null;
   pickedUpAt?: string | null;
   deliveredAt?: string | null;
@@ -53,7 +58,14 @@ export default function MyBidsPanel({
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "bids", filter: `supplier_id=eq.${userId}` },
         async (payload) => {
-          const row = payload.new as { id: string; order_id: string; price: number; status: string };
+          const row = payload.new as {
+            id: string;
+            order_id: string;
+            price: number;
+            delivery_fee: number;
+            delivery_type: string;
+            status: string;
+          };
           const { data: order } = await supabase
             .from("orders")
             .select("title")
@@ -62,7 +74,15 @@ export default function MyBidsPanel({
           setBids((prev) => {
             if (prev.some((b) => b.id === row.id)) return prev;
             return [
-              { id: row.id, order_id: row.order_id, price: row.price, status: row.status, orders: order ? [{ title: order.title }] : null },
+              {
+                id:           row.id,
+                order_id:     row.order_id,
+                price:        row.price,
+                delivery_fee: row.delivery_fee ?? 0,
+                delivery_type: row.delivery_type as "supplier" | "partner",
+                status:       row.status,
+                orders:       order ? [{ title: order.title }] : null,
+              },
               ...prev,
             ];
           });
@@ -125,88 +145,165 @@ export default function MyBidsPanel({
           </p>
         </div>
       ) : (
-        visibleBids.map((bid) => {
-          const s          = statusConfig[bid.status] ?? statusConfig.pending;
-          const orderTitle = bid.orders?.[0]?.title ?? "—";
-          const isWon      = bid.status === "won";
-          const isRejected = bid.status === "rejected";
-          const isPending  = bid.status === "pending";
+        visibleBids.map((bid) => (
+          <BidCard key={bid.id} bid={bid} />
+        ))
+      )}
+    </div>
+  );
+}
 
-          const isSupplierDelivery = bid.deliveryMethod === "supplier";
-          // Supplier sees update controls only when they are the deliverer
-          const canUpdate = isWon && isSupplierDelivery && !!bid.deliveryId;
+// ─── Individual bid card ──────────────────────────────────────────────────────
 
-          const deliveredByLabel = isSupplierDelivery
-            ? "You are delivering this order"
-            : "A delivery partner is handling this";
+function BidCard({ bid }: { bid: SupplierBid }) {
+  const [isPending, startTransition] = useTransition();
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
 
-          return (
-            <div key={bid.id} className={`card border p-4 ${s.cardCls}`}>
-              <p className="mb-2 text-sm font-semibold leading-snug text-slate-800">{orderTitle}</p>
+  const s          = statusConfig[bid.status] ?? statusConfig.pending;
+  const orderTitle = bid.orders?.[0]?.title ?? "—";
+  const isWon      = bid.status === "won";
+  const isRejected = bid.status === "rejected";
+  const isPendingBid = bid.status === "pending";
 
-              <div className="flex items-center justify-between gap-2">
-                <p className={`text-xl font-extrabold ${isWon ? "text-emerald-700" : isRejected ? "text-red-600" : "text-slate-900"}`}>
-                  ${bid.price.toLocaleString()}
-                </p>
-                <div className="flex items-center gap-1.5">
-                  <span className={`badge ${s.badgeCls}`}>{s.label}</span>
-                  {(isPending || isRejected) && (
-                    <Link href={`/supplier/bids/${bid.id}`}>
-                      <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                      </svg>
-                    </Link>
-                  )}
-                </div>
+  const deliveryFee   = bid.delivery_fee   ?? 0;
+  const deliveryType  = bid.delivery_type  ?? "supplier";
+  const totalPrice    = bid.price + deliveryFee;
+
+  // Supplier self-delivers when delivery_type='supplier' or when converted via fallback
+  const isSupplierDelivery = bid.deliveryMethod === "supplier";
+  const canUpdate = isWon && isSupplierDelivery && !!bid.deliveryId;
+
+  // Fallback: partner job timed out (status=pending AND partner_deadline passed)
+  const isPartnerDelivery = bid.deliveryMethod === "delivery_partner" || deliveryType === "partner";
+  const deadlinePassed = isWon && isPartnerDelivery
+    && bid.deliveryStatus === "pending"
+    && !!bid.partnerDeadline
+    && new Date(bid.partnerDeadline) < new Date();
+
+  const deliveredByLabel = isSupplierDelivery
+    ? "You are delivering this order"
+    : "A delivery partner is handling this";
+
+  const handleSelfDeliver = () => {
+    if (!bid.deliveryId) return;
+    setFallbackError(null);
+    startTransition(async () => {
+      const result = await selfDeliverFallback(bid.deliveryId!);
+      if (result.error) setFallbackError(result.error);
+    });
+  };
+
+  const handleCancel = () => {
+    if (!bid.deliveryId) return;
+    setFallbackError(null);
+    startTransition(async () => {
+      const result = await cancelDeliveryFallback(bid.deliveryId!);
+      if (result.error) setFallbackError(result.error);
+    });
+  };
+
+  return (
+    <div className={`card border p-4 ${s.cardCls}`}>
+      <p className="mb-2 text-sm font-semibold leading-snug text-slate-800">{orderTitle}</p>
+
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className={`text-xl font-extrabold ${isWon ? "text-emerald-700" : isRejected ? "text-red-600" : "text-slate-900"}`}>
+            ¥{totalPrice.toLocaleString()}
+          </p>
+          {deliveryFee > 0 && (
+            <p className="text-[10px] text-slate-400">
+              ¥{bid.price.toLocaleString()} + ¥{deliveryFee.toLocaleString()} delivery
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`badge text-[10px] ${deliveryType === "supplier" ? "bg-slate-100 text-slate-600" : "bg-indigo-100 text-indigo-700"}`}>
+            {deliveryType === "supplier" ? "🚛 Self" : "🤝 Partner"}
+          </span>
+          <span className={`badge ${s.badgeCls}`}>{s.label}</span>
+          {(isPendingBid || isRejected) && (
+            <Link href={`/supplier/bids/${bid.id}`}>
+              <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {isPendingBid && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-indigo-600">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+          </svg>
+          Tap to view or edit this bid
+        </p>
+      )}
+
+      {isWon && (
+        <>
+          <p className="mt-2 mb-3 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+            Your bid was accepted
+          </p>
+
+          {/* Partner fallback banner */}
+          {deadlinePassed && (
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-800 mb-2">
+                No delivery partner claimed this job in time.
+              </p>
+              {fallbackError && (
+                <p className="mb-2 text-xs text-red-600">{fallbackError}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSelfDeliver}
+                  disabled={isPending}
+                  className="btn-primary flex-1 justify-center py-2 text-xs disabled:opacity-60"
+                >
+                  {isPending ? "…" : `Deliver myself · ¥${deliveryFee.toLocaleString()}`}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isPending}
+                  className="btn-danger flex-1 justify-center py-2 text-xs disabled:opacity-60"
+                >
+                  {isPending ? "…" : "Cancel order"}
+                </button>
               </div>
-
-              {isPending && (
-                <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-indigo-600">
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                  </svg>
-                  Tap to view or edit this bid
-                </p>
-              )}
-
-              {isWon && (
-                <>
-                  <p className="mt-2 mb-3 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                    Your bid was accepted
-                  </p>
-
-                  {bid.deliveryId ? (
-                    <div className="rounded-xl border border-slate-100 bg-white p-3">
-                      <DeliveryStageTracker
-                        deliveryId={bid.deliveryId}
-                        initialStatus={bid.deliveryStatus ?? "pending"}
-                        initialClaimedAt={bid.claimedAt}
-                        initialPickedUpAt={bid.pickedUpAt}
-                        initialDeliveredAt={bid.deliveredAt}
-                        deliveredByLabel={deliveredByLabel}
-                        canUpdate={canUpdate}
-                      />
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400">Delivery record pending…</p>
-                  )}
-                </>
-              )}
-
-              {isRejected && (
-                <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-red-500">
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  This bid was not selected
-                </p>
-              )}
             </div>
-          );
-        })
+          )}
+
+          {/* Stage tracker */}
+          {bid.deliveryId ? (
+            <div className="rounded-xl border border-slate-100 bg-white p-3">
+              <DeliveryStageTracker
+                deliveryId={bid.deliveryId}
+                initialStatus={bid.deliveryStatus ?? "pending"}
+                initialClaimedAt={bid.claimedAt}
+                initialPickedUpAt={bid.pickedUpAt}
+                initialDeliveredAt={bid.deliveredAt}
+                deliveredByLabel={deliveredByLabel}
+                canUpdate={canUpdate}
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">Delivery record pending…</p>
+          )}
+        </>
+      )}
+
+      {isRejected && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-red-500">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          This bid was not selected
+        </p>
       )}
     </div>
   );

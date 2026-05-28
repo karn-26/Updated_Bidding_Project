@@ -53,7 +53,7 @@ export default async function SupplierDashboardPage() {
   const admin = createAdminClient();
   const { data: myBidsData, error: bidsError } = await admin
     .from("bids")
-    .select(`id, order_id, price, status, orders ( title )`)
+    .select(`id, order_id, price, delivery_type, delivery_fee, delivery_fee_estimated, status, orders ( title )`)
     .eq("supplier_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -69,6 +69,7 @@ export default async function SupplierDashboardPage() {
     id: string;
     status: string;
     delivery_method: string;
+    partner_deadline: string | null;
     claimed_at: string | null;
     picked_up_at: string | null;
     delivered_at: string | null;
@@ -77,7 +78,7 @@ export default async function SupplierDashboardPage() {
   if (wonBidIds.length > 0) {
     const { data: deliveries } = await admin
       .from("deliveries")
-      .select("bid_id, id, status, delivery_method, claimed_at, picked_up_at, delivered_at")
+      .select("bid_id, id, status, delivery_method, partner_deadline, claimed_at, picked_up_at, delivered_at")
       .in("bid_id", wonBidIds);
     for (const d of (deliveries ?? []) as DeliveryDetail[]) {
       deliveryDetailMap.set(d.bid_id, d);
@@ -104,13 +105,17 @@ export default async function SupplierDashboardPage() {
     const detail = deliveryDetailMap.get(bid.id);
     return {
       ...bid,
-      orders:         bid.orders as { title: string }[] | null,
-      deliveryStatus: detail?.status ?? null,
-      deliveryId:     detail?.id ?? null,
-      deliveryMethod: detail?.delivery_method ?? null,
-      claimedAt:      detail?.claimed_at ?? null,
-      pickedUpAt:     detail?.picked_up_at ?? null,
-      deliveredAt:    detail?.delivered_at ?? null,
+      orders:                 bid.orders as { title: string }[] | null,
+      delivery_type:          (bid.delivery_type  as "supplier" | "partner") ?? "supplier",
+      delivery_fee:           (bid.delivery_fee   as number)  ?? 0,
+      delivery_fee_estimated: (bid.delivery_fee_estimated as boolean) ?? false,
+      deliveryStatus:         detail?.status          ?? null,
+      deliveryId:             detail?.id              ?? null,
+      deliveryMethod:         detail?.delivery_method ?? null,
+      partnerDeadline:        detail?.partner_deadline ?? null,
+      claimedAt:              detail?.claimed_at      ?? null,
+      pickedUpAt:             detail?.picked_up_at    ?? null,
+      deliveredAt:            detail?.delivered_at    ?? null,
     };
   });
   const biddedOrderIds = new Set(myBids.map((b) => b.order_id));

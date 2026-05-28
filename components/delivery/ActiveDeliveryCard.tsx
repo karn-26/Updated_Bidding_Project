@@ -10,6 +10,7 @@ type ActiveDelivery = {
   status: "claimed" | "picked_up";
   pickup_address: string | null;
   dropoff_address: string | null;
+  delivery_fee: number;
   claimed_at: string | null;
   picked_up_at: string | null;
   order_id: string;
@@ -53,9 +54,12 @@ export default function ActiveDeliveryCard({ delivery }: { delivery: ActiveDeliv
             {status === "claimed" ? "Ready to pick up" : "En route to restaurant"}
           </p>
         </div>
-        <span className={`badge shrink-0 ${status === "claimed" ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"}`}>
-          {status === "claimed" ? "Claimed" : "Picked Up"}
-        </span>
+        <div className="text-right shrink-0">
+          <p className="text-lg font-extrabold text-indigo-700">¥{delivery.delivery_fee.toLocaleString()}</p>
+          <span className={`badge mt-1 ${status === "claimed" ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-indigo-700"}`}>
+            {status === "claimed" ? "Assigned" : "Picked Up"}
+          </span>
+        </div>
       </div>
 
       {/* Progress bar */}

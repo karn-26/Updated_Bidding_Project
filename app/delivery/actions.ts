@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 
 // ─── claimDelivery ──────────────────────────────────────────────────────────
-// Atomically claims a pending delivery for the calling delivery partner.
+// Atomically claims a pending partner delivery (optimistic locking).
 
 export async function claimDelivery(deliveryId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -24,7 +24,7 @@ export async function claimDelivery(deliveryId: string): Promise<{ error?: strin
     .eq("id", deliveryId)
     .eq("status", "pending")
     .is("delivery_partner_id", null)
-    .select("id, restaurant_id, supplier_id, order_id, orders(title)");
+    .select("id, restaurant_id, supplier_id, order_id, delivery_fee, orders(title)");
 
   if (error) {
     console.error("[claimDelivery] update error:", error);
@@ -32,7 +32,7 @@ export async function claimDelivery(deliveryId: string): Promise<{ error?: strin
   }
 
   if (!data || data.length === 0) {
-    return { error: "This delivery was just claimed by another partner. Please choose another." };
+    return { error: "This delivery was just taken by another partner. Please choose another." };
   }
 
   const delivery = data[0] as {
@@ -40,6 +40,7 @@ export async function claimDelivery(deliveryId: string): Promise<{ error?: strin
     restaurant_id: string;
     supplier_id: string;
     order_id: string;
+    delivery_fee: number;
     orders: { title: string } | { title: string }[] | null;
   };
 
@@ -59,14 +60,14 @@ export async function claimDelivery(deliveryId: string): Promise<{ error?: strin
     {
       user_id: delivery.restaurant_id,
       title:   "Delivery Partner Assigned",
-      message: `${partnerName} has claimed the delivery for "${orderTitle}" and will pick it up shortly.`,
+      message: `${partnerName} has been assigned to deliver "${orderTitle}" and will pick it up shortly.`,
       is_read: false,
       link:    `/orders/${delivery.order_id}`,
     },
     {
       user_id: delivery.supplier_id,
       title:   "Delivery Partner Assigned",
-      message: `${partnerName} has claimed the delivery for "${orderTitle}".`,
+      message: `${partnerName} has been assigned to deliver "${orderTitle}".`,
       is_read: false,
       link:    `/supplier/dashboard`,
     },
@@ -117,7 +118,7 @@ export async function updateDeliveryStatus(
     return { error: `Cannot transition from "${delivery.status}" to "${newStatus}"` };
   }
 
-  const now = new Date().toISOString();
+  const now            = new Date().toISOString();
   const timestampField = newStatus === "picked_up" ? "picked_up_at" : "delivered_at";
 
   const { error: updateError } = await supabase
@@ -134,7 +135,6 @@ export async function updateDeliveryStatus(
 
   const isSupplierDelivery = delivery.delivery_method === "supplier";
 
-  // Deliverer name: for supplier deliveries use auth metadata; for partners use the delivery_partners table
   let delivererName: string;
   if (isSupplierDelivery) {
     delivererName = (user.user_metadata?.business_name as string | undefined) ?? "The supplier";
@@ -150,25 +150,16 @@ export async function updateDeliveryStatus(
   const admin = createAdminClient();
 
   if (newStatus === "delivered") {
-    await admin
-      .from("orders")
-      .update({ status: "fulfilled" })
-      .eq("id", delivery.order_id);
+    await admin.from("orders").update({ status: "fulfilled" }).eq("id", delivery.order_id);
 
-    // Rating notification to restaurant owner depends on delivery method
-    const ratingLink = isSupplierDelivery
-      ? `/bids/rate?supplierId=${delivery.supplier_id}&orderId=${delivery.order_id}&supplierName=${encodeURIComponent(delivererName)}`
-      : `/delivery/rate/${deliveryId}`;
-
-    const ratingPrompt = isSupplierDelivery
-      ? "Please rate your supplier's delivery."
-      : "Please rate your delivery partner.";
+    // CHANGE 6: All rating links go to the supplier rating page regardless of delivery_type
+    const ratingLink = `/bids/rate?supplierId=${delivery.supplier_id}&orderId=${delivery.order_id}&supplierName=${encodeURIComponent(delivererName)}`;
 
     await admin.from("notifications").insert([
       {
         user_id: delivery.restaurant_id,
         title:   "Delivery Completed",
-        message: `"${orderTitle}" has been delivered by ${delivererName}. ${ratingPrompt}`,
+        message: `"${orderTitle}" has been delivered by ${delivererName}. Please rate your supplier.`,
         is_read: false,
         link:    ratingLink,
       },
@@ -209,6 +200,122 @@ export async function updateDeliveryStatus(
   return {};
 }
 
+// ─── selfDeliverFallback ─────────────────────────────────────────────────────
+// Called when no partner claims in time and the supplier chooses to self-deliver.
+
+export async function selfDeliverFallback(deliveryId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const now = new Date().toISOString();
+
+  // Only allow if: still pending, supplier owns this delivery
+  const { data, error } = await supabase
+    .from("deliveries")
+    .update({
+      delivery_method:     "supplier",
+      delivery_partner_id: user.id,
+      status:              "claimed",
+      claimed_at:          now,
+    })
+    .eq("id", deliveryId)
+    .eq("supplier_id", user.id)
+    .eq("status", "pending")
+    .select("id, restaurant_id, order_id, orders(title)");
+
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) return { error: "Could not convert delivery — it may have been claimed." };
+
+  const delivery = data[0] as {
+    id: string;
+    restaurant_id: string;
+    order_id: string;
+    orders: { title: string } | { title: string }[] | null;
+  };
+
+  const orderTitle = Array.isArray(delivery.orders)
+    ? delivery.orders[0]?.title ?? "your order"
+    : (delivery.orders as { title: string } | null)?.title ?? "your order";
+
+  const delivererName = (user.user_metadata?.business_name as string | undefined) ?? "The supplier";
+
+  const admin = createAdminClient();
+  await admin.from("notifications").insert({
+    user_id: delivery.restaurant_id,
+    title:   "Supplier Will Deliver",
+    message: `No delivery partner was found in time. ${delivererName} will deliver "${orderTitle}" themselves.`,
+    is_read: false,
+    link:    `/orders/${delivery.order_id}`,
+  });
+
+  revalidatePath("/supplier/dashboard");
+  return {};
+}
+
+// ─── cancelDeliveryFallback ──────────────────────────────────────────────────
+// Called when no partner claims and the supplier cancels the order.
+
+export async function cancelDeliveryFallback(deliveryId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // Fetch delivery info
+  const { data: delivery, error: fetchError } = await supabase
+    .from("deliveries")
+    .select("id, restaurant_id, supplier_id, order_id, status, orders(title)")
+    .eq("id", deliveryId)
+    .eq("supplier_id", user.id)
+    .single();
+
+  if (fetchError || !delivery) return { error: "Delivery not found." };
+  if (delivery.status !== "pending") return { error: "Delivery is no longer in a cancellable state." };
+
+  const del = delivery as {
+    id: string;
+    restaurant_id: string;
+    supplier_id: string;
+    order_id: string;
+    status: string;
+    orders: { title: string } | { title: string }[] | null;
+  };
+
+  const orderTitle = Array.isArray(del.orders)
+    ? del.orders[0]?.title ?? "your order"
+    : (del.orders as { title: string } | null)?.title ?? "your order";
+
+  // Cancel the order
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({ status: "cancelled" })
+    .eq("id", del.order_id);
+
+  if (cancelError) return { error: cancelError.message };
+
+  const admin = createAdminClient();
+  await admin.from("notifications").insert([
+    {
+      user_id: del.restaurant_id,
+      title:   "Order Cancelled",
+      message: `The supplier cancelled order "${orderTitle}" because no delivery partner was found.`,
+      is_read: false,
+      link:    `/dashboard`,
+    },
+    {
+      user_id: del.supplier_id,
+      title:   "Order Cancelled",
+      message: `You have cancelled "${orderTitle}" due to no delivery partner being available.`,
+      is_read: false,
+      link:    `/supplier/dashboard`,
+    },
+  ]);
+
+  revalidatePath("/supplier/dashboard");
+  revalidatePath("/delivery/dashboard");
+  return {};
+}
+
 // ─── updateDeliveryPartnerProfile ───────────────────────────────────────────
 
 export async function updateDeliveryPartnerProfile(formData: FormData): Promise<{ error?: string }> {
@@ -216,23 +323,38 @@ export async function updateDeliveryPartnerProfile(formData: FormData): Promise<
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const city          = formData.get("city")          as string | null;
-  const country       = formData.get("country")       as string | null;
   const phone         = formData.get("phone")         as string | null;
   const vehicle_type  = formData.get("vehicle_type")  as string | null;
   const is_available  = formData.get("is_available") === "true";
   const business_name = formData.get("business_name") as string | null;
+  const postal_code   = formData.get("postal_code")   as string | null;
+  const prefecture    = formData.get("prefecture")    as string | null;
+  const city_ward     = formData.get("city_ward")     as string | null;
+  const block_banchi  = formData.get("block_banchi")  as string | null;
+
+  // Resolve coordinates from updated postal code
+  let latitude:  number | null = null;
+  let longitude: number | null = null;
+  if (postal_code) {
+    const { resolveCoords } = await import("@/lib/jp_postal");
+    const coords = resolveCoords(postal_code, prefecture ?? undefined);
+    if (coords) { latitude = coords.lat; longitude = coords.lng; }
+  }
 
   const { error } = await supabase
     .from("delivery_partners")
     .upsert({
       id: user.id,
       business_name: business_name ?? undefined,
-      city:          city          ?? null,
-      country:       country       ?? null,
       phone:         phone         ?? null,
       vehicle_type:  vehicle_type  ?? null,
       is_available,
+      postal_code:   postal_code   ?? null,
+      prefecture:    prefecture    ?? null,
+      city_ward:     city_ward     ?? null,
+      block_banchi:  block_banchi  ?? null,
+      latitude,
+      longitude,
       updated_at:    new Date().toISOString(),
     });
 

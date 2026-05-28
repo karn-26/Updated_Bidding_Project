@@ -25,8 +25,8 @@ const TABS = [
 
 type ProfileRow = {
   id: string;
-  city: string | null;
-  country: string | null;
+  prefecture: string | null;
+  city_ward: string | null;
   average_rating: number;
   total_ratings: number;
 };
@@ -52,7 +52,7 @@ export default async function BidsPage({
   const activeTab   = status ?? null;
   const dbStatus    = activeTab ? (STATUS_MAP[activeTab] ?? null) : null;
 
-  // When filtering by order, fetch its title for the header
+  // When filtering by order, fetch its title
   let orderTitle: string | null = null;
   if (orderFilter) {
     const { data: orderRow } = await supabase
@@ -73,6 +73,9 @@ export default async function BidsPage({
       supplier_id,
       supplier_name,
       price,
+      delivery_type,
+      delivery_fee,
+      delivery_fee_estimated,
       notes,
       status,
       created_at,
@@ -90,22 +93,16 @@ export default async function BidsPage({
 
   // ── Fetch supplier profiles ────────────────────────────────────────────────
   const supplierIds = [
-    ...new Set(
-      bids
-        .map((b) => b.supplier_id)
-        .filter((id): id is string => !!id)
-    ),
+    ...new Set(bids.map((b) => b.supplier_id).filter((id): id is string => !!id)),
   ];
 
   const profileMap = new Map<string, ProfileRow>();
   if (supplierIds.length > 0) {
     const { data: profiles } = await supabase
       .from("supplier_profiles")
-      .select("id, city, country, average_rating, total_ratings")
+      .select("id, prefecture, city_ward, average_rating, total_ratings")
       .in("id", supplierIds);
-    for (const p of profiles ?? []) {
-      profileMap.set(p.id, p as ProfileRow);
-    }
+    for (const p of profiles ?? []) profileMap.set(p.id, p as ProfileRow);
   }
 
   // ── Already-rated orders ───────────────────────────────────────────────────
@@ -117,7 +114,7 @@ export default async function BidsPage({
     (ratedData ?? []).map((r: { order_id: string }) => r.order_id)
   );
 
-  // ── Delivery status for won bids (determines rating link eligibility) ──────
+  // ── Delivery status for won bids ───────────────────────────────────────────
   const wonOrderIds = bids
     .filter((b) => b.status === "won")
     .map((b) => b.order_id)
@@ -134,16 +131,13 @@ export default async function BidsPage({
     }
   }
 
-  // ── Restaurant's city for locality matching ────────────────────────────────
-  const restaurantCity =
-    (user.user_metadata?.city as string | undefined)?.toLowerCase() ?? null;
+  // ── Restaurant's prefecture/city for locality matching ────────────────────
+  const restaurantPref = user.user_metadata?.prefecture as string | undefined;
 
   // ── Sort: local bids first ─────────────────────────────────────────────────
   const sortedBids = [...bids].sort((a, b) => {
-    const aCity = profileMap.get(a.supplier_id ?? "")?.city?.toLowerCase();
-    const bCity = profileMap.get(b.supplier_id ?? "")?.city?.toLowerCase();
-    const aLocal = restaurantCity !== null && aCity === restaurantCity;
-    const bLocal = restaurantCity !== null && bCity === restaurantCity;
+    const aLocal = restaurantPref && profileMap.get(a.supplier_id ?? "")?.prefecture === restaurantPref;
+    const bLocal = restaurantPref && profileMap.get(b.supplier_id ?? "")?.prefecture === restaurantPref;
     if (aLocal && !bLocal) return -1;
     if (!aLocal && bLocal) return 1;
     return 0;
@@ -167,10 +161,7 @@ export default async function BidsPage({
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {orderFilter && (
-              <Link
-                href="/dashboard"
-                className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-800"
-              >
+              <Link href="/dashboard" className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-800">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
@@ -216,16 +207,6 @@ export default async function BidsPage({
               </Link>
             );
           })}
-
-          {/* Locality hint */}
-          {!restaurantCity && (
-            <Link
-              href="/settings"
-              className="ml-auto shrink-0 text-xs font-medium text-slate-400 hover:text-indigo-600 transition-colors"
-            >
-              Set your city to see LOCAL badges →
-            </Link>
-          )}
         </div>
 
         {/* Bid cards */}
@@ -235,34 +216,30 @@ export default async function BidsPage({
             const title = (bid.orders as { title: string }[] | null)?.[0]?.title ?? "—";
 
             const profile      = profileMap.get(bid.supplier_id ?? "");
-            const isLocal      = restaurantCity !== null
-              && profile?.city?.toLowerCase() === restaurantCity;
+            const isLocal      = restaurantPref && profile?.prefecture === restaurantPref;
             const alreadyRated = ratedOrderIds.has(bid.order_id);
             const avgRating    = profile?.average_rating ?? 0;
             const totalRatings = profile?.total_ratings ?? 0;
 
-            // Determine rating link eligibility for won bids
-            const delivery           = deliveryMap.get(bid.order_id ?? "");
-            const isDelivered        = delivery?.status === "delivered";
-            const isSupplierDelivery = delivery?.delivery_method === "supplier";
-            const showSupplierRate   = isDelivered && isSupplierDelivery && !alreadyRated;
-            const showPartnerRate    = isDelivered && !isSupplierDelivery;
+            const delivery    = deliveryMap.get(bid.order_id ?? "");
+            const isDelivered = delivery?.status === "delivered";
+            const canRate     = isDelivered && !alreadyRated;
+
+            const deliveryFee  = (bid.delivery_fee as number) ?? 0;
+            const deliveryType = (bid.delivery_type as "supplier" | "partner") ?? "supplier";
+            const totalPrice   = bid.price + deliveryFee;
 
             return (
               <div key={bid.id} className="card p-6 transition hover:shadow-card-hover">
                 {/* Top row */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-                      {title}
-                    </p>
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{title}</p>
 
                     {/* Supplier name + LOCAL badge + rating */}
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg font-bold text-slate-900">{bid.supplier_name}</h3>
-                      {isLocal && (
-                        <span className="badge bg-emerald-100 text-emerald-700">LOCAL</span>
-                      )}
+                      {isLocal && <span className="badge bg-emerald-100 text-emerald-700">LOCAL</span>}
                       {totalRatings > 0 && (
                         <span className="flex items-center gap-0.5 text-sm">
                           <svg className="h-4 w-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
@@ -275,19 +252,32 @@ export default async function BidsPage({
                     </div>
 
                     {/* Location */}
-                    {profile?.city && (
+                    {profile?.prefecture && (
                       <p className="mt-0.5 text-xs text-slate-400">
-                        📍 {profile.city}{profile.country ? `, ${profile.country}` : ""}
+                        📍 {profile.prefecture}{profile.city_ward ? ` ${profile.city_ward}` : ""}
                       </p>
                     )}
 
                     <p className="mt-1.5 text-sm leading-relaxed text-slate-500">{bid.notes}</p>
+
+                    {/* Delivery method badge */}
+                    <div className="mt-2">
+                      <span className={`badge ${deliveryType === "supplier" ? "bg-slate-100 text-slate-600" : "bg-indigo-100 text-indigo-700"}`}>
+                        {deliveryType === "supplier" ? "🚛 Supplier delivers" : "🤝 Delivery partner"}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="shrink-0 text-right">
+                    {/* Total price breakdown */}
                     <p className="text-2xl font-extrabold text-slate-900">
-                      ${bid.price.toLocaleString()}
+                      ¥{totalPrice.toLocaleString()}
                     </p>
+                    {deliveryFee > 0 && (
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        ¥{bid.price.toLocaleString()} goods + ¥{deliveryFee.toLocaleString()} delivery
+                      </p>
+                    )}
                     <span className={`badge mt-1.5 ${s.cls}`}>{s.label}</span>
                   </div>
                 </div>
@@ -300,9 +290,7 @@ export default async function BidsPage({
                       <input type="hidden" name="bid_id"      value={bid.id} />
                       <input type="hidden" name="supplier_id" value={bid.supplier_id} />
                       <input type="hidden" name="order_id"    value={bid.order_id} />
-                      <button type="submit" className="btn-danger">
-                        Decline
-                      </button>
+                      <button type="submit" className="btn-danger">Decline</button>
                     </form>
                   </div>
                 )}
@@ -317,7 +305,13 @@ export default async function BidsPage({
                         </svg>
                       </div>
                       <span className="text-sm font-medium text-emerald-700">
-                        {isSupplierDelivery ? "Bid accepted — supplier delivering" : "Bid accepted — awaiting delivery"}
+                        {delivery?.status === "pending"
+                          ? "Accepted — finding delivery partner…"
+                          : delivery?.status === "claimed"
+                          ? "Accepted — delivery in progress"
+                          : delivery?.status === "delivered"
+                          ? "Delivered"
+                          : "Bid accepted"}
                       </span>
                     </div>
 
@@ -328,19 +322,13 @@ export default async function BidsPage({
                         </svg>
                         Rated
                       </span>
-                    ) : showSupplierRate ? (
+                    ) : canRate ? (
+                      // All ratings go to the supplier rating page (CHANGE 6)
                       <Link
                         href={`/bids/rate?supplierId=${bid.supplier_id}&orderId=${bid.order_id}&supplierName=${encodeURIComponent(bid.supplier_name ?? "")}`}
                         className="ml-auto text-xs font-semibold text-amber-600 underline hover:text-amber-700 transition-colors"
                       >
                         Rate supplier
-                      </Link>
-                    ) : showPartnerRate ? (
-                      <Link
-                        href={`/delivery/rate/${delivery!.id}`}
-                        className="ml-auto text-xs font-semibold text-amber-600 underline hover:text-amber-700 transition-colors"
-                      >
-                        Rate delivery partner
                       </Link>
                     ) : null}
                   </div>
@@ -361,9 +349,7 @@ export default async function BidsPage({
                 : "Post an order to start receiving bids from suppliers."}
             </p>
             {!orderFilter && (
-              <Link href="/orders/new" className="btn-primary mx-auto mt-6 inline-flex">
-                Post an order
-              </Link>
+              <Link href="/orders/new" className="btn-primary mx-auto mt-6 inline-flex">Post an order</Link>
             )}
           </div>
         )}

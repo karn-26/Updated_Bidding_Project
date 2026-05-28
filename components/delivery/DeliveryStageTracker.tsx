@@ -6,7 +6,7 @@ import { updateDeliveryStatus } from "@/app/delivery/actions";
 
 const STEPS = [
   { key: "pending",   label: "Created"   },
-  { key: "claimed",   label: "Claimed"   },
+  { key: "claimed",   label: "Assigned"  },
   { key: "picked_up", label: "Picked Up" },
   { key: "delivered", label: "Delivered" },
 ] as const;

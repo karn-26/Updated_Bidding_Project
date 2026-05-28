@@ -11,9 +11,12 @@ export type PendingDelivery = {
   status: string;
   pickup_address: string | null;
   dropoff_address: string | null;
+  delivery_fee: number;
   created_at: string;
   orderTitle: string;
   orderItems: OrderItem[];
+  distanceKm: number | null;
+  isNear: boolean;
 };
 
 export default function LiveDeliveriesFeed({
@@ -27,7 +30,7 @@ export default function LiveDeliveriesFeed({
 }) {
   const [deliveries, setDeliveries] = useState<PendingDelivery[]>(initialDeliveries);
   const [claimingId, setClaimingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors]         = useState<Record<string, string>>({});
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -45,16 +48,15 @@ export default function LiveDeliveriesFeed({
             delivery_method: string;
             pickup_address: string | null;
             dropoff_address: string | null;
+            delivery_fee: number;
             created_at: string;
             order_id: string;
             delivery_partner_id: string | null;
           };
 
-          // Only surface pending unclaimed delivery_partner deliveries
           if (row.status !== "pending" || row.delivery_partner_id !== null) return;
           if (row.delivery_method !== "delivery_partner") return;
 
-          // Fetch the related order to get title and items
           const { data: order } = await supabase
             .from("orders")
             .select("title, order_items ( name, quantity, unit )")
@@ -71,9 +73,12 @@ export default function LiveDeliveriesFeed({
                 status:          row.status,
                 pickup_address:  row.pickup_address,
                 dropoff_address: row.dropoff_address,
+                delivery_fee:    row.delivery_fee ?? 0,
                 created_at:      row.created_at,
                 orderTitle:      order?.title ?? "—",
                 orderItems,
+                distanceKm:      null,
+                isNear:          false,
               },
               ...prev,
             ];
@@ -85,7 +90,6 @@ export default function LiveDeliveriesFeed({
         { event: "UPDATE", schema: "public", table: "deliveries" },
         (payload) => {
           const row = payload.new as { id: string; status: string; delivery_partner_id: string | null };
-          // Remove from list if it's been claimed by anyone (status no longer pending)
           if (row.status !== "pending") {
             setDeliveries((prev) => prev.filter((d) => d.id !== row.id));
           }
@@ -113,7 +117,6 @@ export default function LiveDeliveriesFeed({
       if (result.error) {
         setErrors((prev) => ({ ...prev, [deliveryId]: result.error! }));
       } else {
-        // Remove from list immediately — realtime will also fire
         setDeliveries((prev) => prev.filter((d) => d.id !== deliveryId));
       }
       setClaimingId(null);
@@ -138,33 +141,41 @@ export default function LiveDeliveriesFeed({
           {/* Header */}
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-slate-900">{delivery.orderTitle}</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900">{delivery.orderTitle}</h3>
+                {delivery.isNear && (
+                  <span className="badge bg-emerald-100 text-emerald-700">Near you</span>
+                )}
+              </div>
               <p className="mt-0.5 text-xs text-slate-400">
-                Posted {new Date(delivery.created_at).toLocaleDateString("en-US", {
+                Posted {new Date(delivery.created_at).toLocaleDateString("ja-JP", {
                   month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
                 })}
+                {delivery.distanceKm !== null && (
+                  <span className="ml-2 font-medium text-slate-500">
+                    · {delivery.distanceKm.toFixed(1)} km away
+                  </span>
+                )}
               </p>
             </div>
-            <span className="badge bg-indigo-100 text-indigo-700 shrink-0">Available</span>
+            <div className="text-right shrink-0">
+              <p className="text-xl font-extrabold text-indigo-700">
+                ¥{delivery.delivery_fee.toLocaleString()}
+              </p>
+              <p className="text-xs text-slate-400">delivery fee</p>
+              <span className="badge mt-1 bg-indigo-100 text-indigo-700">Available</span>
+            </div>
           </div>
 
           {/* Addresses */}
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-              <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                Pickup
-              </p>
-              <p className="text-sm font-medium text-slate-800">
-                {delivery.pickup_address ?? "Address TBC"}
-              </p>
+              <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Pickup</p>
+              <p className="text-sm font-medium text-slate-800">{delivery.pickup_address ?? "Address TBC"}</p>
             </div>
             <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-              <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                Dropoff
-              </p>
-              <p className="text-sm font-medium text-slate-800">
-                {delivery.dropoff_address ?? "Address TBC"}
-              </p>
+              <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Dropoff</p>
+              <p className="text-sm font-medium text-slate-800">{delivery.dropoff_address ?? "Address TBC"}</p>
             </div>
           </div>
 
@@ -176,10 +187,7 @@ export default function LiveDeliveriesFeed({
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {delivery.orderItems.slice(0, 4).map((item, i) => (
-                  <span
-                    key={i}
-                    className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600"
-                  >
+                  <span key={i} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">
                     {item.quantity} {item.unit} {item.name}
                   </span>
                 ))}
@@ -203,7 +211,9 @@ export default function LiveDeliveriesFeed({
             disabled={claimingId === delivery.id || isPending}
             className="btn-primary w-full justify-center py-3 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {claimingId === delivery.id ? "Claiming…" : "Claim Delivery"}
+            {claimingId === delivery.id
+              ? "Claiming…"
+              : `Accept this delivery · ¥${delivery.delivery_fee.toLocaleString()}`}
           </button>
         </div>
       ))}

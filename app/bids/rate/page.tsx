@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import StarRatingForm from "./StarRatingForm";
 
+/**
+ * CHANGE 6: All post-delivery ratings go through this page.
+ * The restaurant rates the SUPPLIER regardless of delivery_type.
+ * Guard: only allows rating when delivery.status = 'delivered'.
+ */
 export default async function RateBidPage({
   searchParams,
 }: {
@@ -34,16 +39,11 @@ export default async function RateBidPage({
   // Guard: only allow rating when the delivery is completed
   const { data: delivery } = await supabase
     .from("deliveries")
-    .select("id, status, delivery_method")
+    .select("id, status")
     .eq("order_id", orderId)
     .maybeSingle();
 
-  // Rating via this page is only for supplier-delivered orders after delivery
   if (!delivery || delivery.status !== "delivered") redirect("/bids");
-  if (delivery.delivery_method !== "supplier") {
-    // Partner-delivered orders use /delivery/rate/[deliveryId] instead
-    redirect(`/delivery/rate/${delivery.id}`);
-  }
 
   // Guard: don't show the form if this order was already rated
   const { data: existing } = await supabase

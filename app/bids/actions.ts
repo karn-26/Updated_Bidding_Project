@@ -5,12 +5,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-export async function acceptBid(formData: FormData) {
-  const bidId          = formData.get("bid_id")          as string | null;
-  const orderId        = formData.get("order_id")        as string | null;
-  const deliveryMethod = (formData.get("delivery_method") as string | null) ?? "delivery_partner";
+// ── How long (hours) to wait for a partner to claim before fallback fires ──
+const PARTNER_DEADLINE_HOURS = 24;
 
-  console.log("[acceptBid] called with bidId:", bidId, "orderId:", orderId, "deliveryMethod:", deliveryMethod);
+export async function acceptBid(formData: FormData) {
+  const bidId   = formData.get("bid_id")   as string | null;
+  const orderId = formData.get("order_id") as string | null;
 
   if (!bidId || !orderId) {
     console.error("[acceptBid] Missing bidId or orderId — aborting.");
@@ -19,18 +19,30 @@ export async function acceptBid(formData: FormData) {
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-  console.log("[acceptBid] auth user:", user?.id ?? null, "authError:", authError);
   if (!user) {
-    console.error("[acceptBid] No authenticated user — aborting.");
+    console.error("[acceptBid] No authenticated user — aborting.", authError);
     return;
   }
 
-  // 0. Fetch the winning bid to get supplier_id, supplier_name
-  const { data: winningBid } = await supabase
+  const admin = createAdminClient();
+
+  // 0. Fetch the winning bid to get supplier info + delivery_type + delivery_fee
+  const { data: winningBid } = await admin
     .from("bids")
-    .select("id, supplier_id, supplier_name")
+    .select("id, supplier_id, supplier_name, delivery_type, delivery_fee")
     .eq("id", bidId)
     .single();
+
+  if (!winningBid) {
+    console.error("[acceptBid] Winning bid not found.");
+    return;
+  }
+
+  const supplierId    = winningBid.supplier_id   ?? "";
+  const deliveryType  = (winningBid.delivery_type  as "supplier" | "partner") ?? "supplier";
+  const deliveryFee   = (winningBid.delivery_fee   as number) ?? 0;
+  // Map bid.delivery_type to delivery.delivery_method column values
+  const deliveryMethod = deliveryType === "partner" ? "delivery_partner" : "supplier";
 
   // 1. Mark the winning bid as 'won'
   const { data: wonData, error: winError } = await supabase
@@ -39,14 +51,8 @@ export async function acceptBid(formData: FormData) {
     .eq("id", bidId)
     .select("id, status");
 
-  console.log("[acceptBid] set winning bid — data:", wonData, "error:", winError);
-
-  if (winError) {
+  if (winError || !wonData || wonData.length === 0) {
     console.error("[acceptBid] Failed to set winning bid:", winError);
-    return;
-  }
-  if (!wonData || wonData.length === 0) {
-    console.error("[acceptBid] Winning bid update matched 0 rows.");
     return;
   }
 
@@ -61,20 +67,14 @@ export async function acceptBid(formData: FormData) {
   if (rejectError) console.error("[acceptBid] Failed to reject other bids:", rejectError);
 
   // 3. Move order to 'in_delivery'
-  const { data: orderData, error: orderError } = await supabase
+  const { error: orderError } = await supabase
     .from("orders")
     .update({ status: "in_delivery" })
-    .eq("id", orderId)
-    .select("id, status, title");
+    .eq("id", orderId);
 
   if (orderError) console.error("[acceptBid] Failed to update order status:", orderError);
-  if (!orderData || orderData.length === 0) {
-    console.error("[acceptBid] Order update matched 0 rows.");
-  }
 
-  const admin = createAdminClient();
-
-  // 4. Fetch order details for notifications and delivery record
+  // 4. Fetch order details
   const { data: orderRow } = await admin
     .from("orders")
     .select("title, restaurant_id")
@@ -83,40 +83,67 @@ export async function acceptBid(formData: FormData) {
 
   const orderTitle   = orderRow?.title        ?? "your order";
   const restaurantId = orderRow?.restaurant_id ?? user.id;
-  const supplierId   = winningBid?.supplier_id ?? "";
 
-  // 5. Fetch supplier's city for pickup_address placeholder
+  // 5. Fetch supplier address + coords for pickup
   const { data: supplierProfile } = await admin
     .from("supplier_profiles")
-    .select("city, country")
+    .select("postal_code, prefecture, city_ward, block_banchi, latitude, longitude, city, country")
     .eq("id", supplierId)
     .maybeSingle();
 
-  // 6. Fetch restaurant owner's city for dropoff_address placeholder
-  const { data: restaurantUser } = await admin.auth.admin.getUserById(restaurantId);
-  const restaurantCity =
-    restaurantUser?.user?.user_metadata?.city as string | undefined;
+  // 6. Fetch restaurant address + coords for dropoff
+  const { data: restaurantProfile } = await admin
+    .from("restaurant_profiles")
+    .select("postal_code, prefecture, city_ward, block_banchi, latitude, longitude")
+    .eq("id", restaurantId)
+    .maybeSingle();
 
-  const pickupAddress  = supplierProfile?.city
-    ? `${supplierProfile.city}${supplierProfile.country ? `, ${supplierProfile.country}` : ""}`
+  // Fallback to user_metadata for restaurant coords if profile not populated yet
+  const { data: restaurantUserData } = await admin.auth.admin.getUserById(restaurantId);
+  const restaurantMeta = restaurantUserData?.user?.user_metadata;
+
+  const pickupAddress = supplierProfile
+    ? [supplierProfile.prefecture, supplierProfile.city_ward, supplierProfile.block_banchi]
+        .filter(Boolean).join(" ")
+    : (supplierProfile as null)
+    ?? null;
+
+  const dropoffAddress = restaurantProfile
+    ? [restaurantProfile.prefecture, restaurantProfile.city_ward, restaurantProfile.block_banchi]
+        .filter(Boolean).join(" ")
+    : (restaurantMeta?.prefecture && restaurantMeta?.city_ward
+      ? `${restaurantMeta.prefecture} ${restaurantMeta.city_ward}`
+      : null);
+
+  const pickupLat  = supplierProfile?.latitude  ?? null;
+  const pickupLng  = supplierProfile?.longitude ?? null;
+  const dropoffLat = restaurantProfile?.latitude  ?? (restaurantMeta?.latitude  as number | null | undefined) ?? null;
+  const dropoffLng = restaurantProfile?.longitude ?? (restaurantMeta?.longitude as number | null | undefined) ?? null;
+
+  const isSupplierDelivery = deliveryType === "supplier";
+
+  // 7. Compute partner_deadline (only for partner deliveries)
+  const partnerDeadline = !isSupplierDelivery
+    ? new Date(Date.now() + PARTNER_DEADLINE_HOURS * 60 * 60 * 1000).toISOString()
     : null;
-  const dropoffAddress = restaurantCity ?? null;
 
-  const isSupplierDelivery = deliveryMethod === "supplier";
-
-  // 7. Create delivery record
-  //    For supplier delivery: delivery_partner_id = supplier_id, status = 'claimed'
-  //    This lets the supplier call updateDeliveryStatus() using the same action.
+  // 8. Create delivery record
   const { data: delivery, error: deliveryError } = await admin
     .from("deliveries")
     .insert({
-      order_id:            orderId,
-      bid_id:              bidId,
-      restaurant_id:       restaurantId,
-      supplier_id:         supplierId,
-      delivery_method:     deliveryMethod,
-      pickup_address:      pickupAddress,
-      dropoff_address:     dropoffAddress,
+      order_id:           orderId,
+      bid_id:             bidId,
+      restaurant_id:      restaurantId,
+      supplier_id:        supplierId,
+      delivery_method:    deliveryMethod,
+      delivery_fee:       deliveryFee,
+      pickup_address:     pickupAddress,
+      dropoff_address:    dropoffAddress,
+      pickup_lat:         pickupLat,
+      pickup_lng:         pickupLng,
+      dropoff_lat:        dropoffLat,
+      dropoff_lng:        dropoffLng,
+      partner_deadline:   partnerDeadline,
       ...(isSupplierDelivery
         ? {
             delivery_partner_id: supplierId,
@@ -135,12 +162,11 @@ export async function acceptBid(formData: FormData) {
     console.error("[acceptBid] Failed to create delivery record:", deliveryError);
   }
 
-  // 8. Notifications
-  // 8a. Winning supplier
+  // 9. Notify winning supplier
   if (supplierId) {
     const supplierMessage = isSupplierDelivery
       ? `Congratulations! Your bid on "${orderTitle}" was accepted. You are responsible for delivering this order — please update the delivery stages from your dashboard.`
-      : `Congratulations! Your bid on "${orderTitle}" was accepted. A delivery partner will be assigned shortly.`;
+      : `Congratulations! Your bid on "${orderTitle}" was accepted. The platform will find a delivery partner. You will be notified once one is assigned.`;
 
     await admin.from("notifications").insert({
       user_id: supplierId,
@@ -151,26 +177,38 @@ export async function acceptBid(formData: FormData) {
     });
   }
 
-  // 8b. Rejected suppliers
+  // 10. Notify rejected suppliers
   if (rejectedData && rejectedData.length > 0) {
-    const rejectedNotifications = rejectedData.map((b) => ({
-      user_id: b.supplier_id,
-      title:   "Your Bid Was Not Selected",
-      message: `The restaurant chose a different supplier for "${orderTitle}".`,
-      is_read: false,
-      link:    `/supplier/dashboard`,
-    }));
-    await admin.from("notifications").insert(rejectedNotifications);
+    await admin.from("notifications").insert(
+      rejectedData.map((b) => ({
+        user_id: b.supplier_id,
+        title:   "Your Bid Was Not Selected",
+        message: `The restaurant chose a different supplier for "${orderTitle}".`,
+        is_read: false,
+        link:    `/supplier/dashboard`,
+      }))
+    );
   }
 
-  // 8c. Fan-out to delivery partners only when using the delivery partner method
+  // 11. Notify restaurant about pending partner assignment
+  if (!isSupplierDelivery) {
+    await admin.from("notifications").insert({
+      user_id: restaurantId,
+      title:   "Finding a Delivery Partner",
+      message: `Your order "${orderTitle}" has been accepted. We are finding a delivery partner — you will be notified once one is assigned.`,
+      is_read: false,
+      link:    `/bids`,
+    });
+  }
+
+  // 12. Fan-out to delivery partners when using the partner method
   if (!isSupplierDelivery && delivery?.id) {
     fetch(
       `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/notify-new-delivery`,
       {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ deliveryId: delivery.id, orderTitle }),
+        body:    JSON.stringify({ deliveryId: delivery.id, orderTitle, deliveryFee }),
       }
     ).catch((e) => console.error("[acceptBid] notify-new-delivery failed:", e));
   }
@@ -179,7 +217,6 @@ export async function acceptBid(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/orders");
 
-  // Redirect back to bids — rating happens only after delivery is completed
   redirect("/bids");
 }
 
